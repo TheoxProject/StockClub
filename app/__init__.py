@@ -81,9 +81,11 @@ def create_app(test_config: dict | None = None) -> Flask:
     from .models import Category, Item, StockMovement, User  # noqa: F401
     from .auth import bp as auth_bp
     from .inventory import bp as inventory_bp
+    from .admin import bp as admin_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(inventory_bp)
+    app.register_blueprint(admin_bp)
 
     @app.context_processor
     def inject_helpers():
@@ -118,6 +120,10 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error):
         return render_template("error.html", code=400, message="Le formulaire a expiré. Recharge la page puis réessaie."), 400
+
+    @app.errorhandler(403)
+    def forbidden(error):
+        return render_template("error.html", code=403, message="Cette page est réservée aux administrateurs."), 403
 
     @app.errorhandler(404)
     def not_found(error):
@@ -171,6 +177,19 @@ def create_app(test_config: dict | None = None) -> Flask:
         user.locked_until = None
         db.session.commit()
         click.echo(f"Mot de passe mis à jour pour {user.login}.")
+
+    @app.cli.command("promote-admin")
+    @click.argument("login_name")
+    def promote_admin_command(login_name):
+        """Grant administrator access to an existing account (recovery/bootstrap)."""
+        from .models import User
+        user = User.query.filter_by(login=login_name.strip().casefold()).first()
+        if user is None:
+            raise click.ClickException("Utilisateur introuvable.")
+        user.role = "admin"
+        user.is_active_user = True
+        db.session.commit()
+        click.echo(f"Droits administrateur accordés à {user.login}.")
 
     @app.cli.command("deactivate-user")
     @click.argument("login_name")

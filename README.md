@@ -14,9 +14,9 @@ Sports clubs often manage equipment through spreadsheets, paper lists, or inform
 - **Visual inventory:** equipment records include a photo, description, quantity, condition, and storage location.
 - **Photo upload:** validates and re-encodes supported images as WebP; EXIF metadata is removed during conversion.
 - **Borrow/return history:** records quantity changes, reason, timestamp, and the responsible volunteer.
-- **Shared access:** login-based accounts managed by an administrator through Flask CLI commands.
+- **Role-based access:** members manage the inventory; administrators can manage member accounts and issue one-use invitation links.
 - **Mobile-friendly UI:** responsive layout and installable PWA manifest.
-- **Storage separation:** SQL database for structured data and S3-compatible object storage (e.g. Cloudflare R2) for photos in hosted deployments.
+- **Storage separation:** SQL database for structured data and Neon Object Storage (S3-compatible) for photos in hosted deployments.
 - **Database migrations and tests:** schema changes managed with Flask-Migrate/Alembic; automated tests included.
 
 ## Tech stack
@@ -93,9 +93,10 @@ Never commit `.env` or any real credentials. `.env.example` contains placeholder
 ```bash
 python -m flask --app run.py db upgrade
 python -m flask --app run.py create-user
+python -m flask --app run.py promote-admin monlogin
 ```
 
-The CLI prompts for a login and a password of at least six characters. Create additional volunteer accounts with the same command.
+The CLI prompts for a login and a password of at least six characters. On a fresh database, promote the first account to administrator with `python -m flask --app run.py promote-admin monlogin`. In an existing deployment, the role migration automatically promotes the oldest existing account. Administrators can create personal invitation links from **Membres**. Each link is single-use, expires after seven days, and creates a `Membre` account.
 
 ### 4. Start the development server
 
@@ -113,13 +114,13 @@ python -m pytest -q
 
 ## Deployment
 
-A sample Render Blueprint is included in `render.yaml`, and `DEPLOYMENT.md` describes a deployment using Render, Neon PostgreSQL, and Cloudflare R2.
+A sample Render Blueprint is included in `render.yaml`, and `DEPLOYMENT.md` describes a deployment using Render, Neon PostgreSQL, and Neon Object Storage.
 
 Before deploying:
 
 1. Configure a strong, private `SECRET_KEY` (Render can generate it through the Blueprint).
 2. Set `DATABASE_URL` to your managed PostgreSQL connection string with TLS enabled.
-3. Configure the R2/S3 endpoint, bucket, and credentials as environment variables in the hosting provider.
+3. Configure the Neon Object Storage endpoint, bucket, region, and credentials as environment variables in the hosting provider.
 4. Keep the bucket private and use signed photo URLs unless a deliberate public-photo policy is chosen.
 5. Configure and test database and photo backups, plus restoration.
 6. Run the migration against the intended database before first use.

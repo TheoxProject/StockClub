@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Gestion des membres{% endblock %}
+{% block content %}
+<section class="page-heading admin-page-heading">
+  <div>
+    <span class="eyebrow">ADMINISTRATION</span>
+    <h1>Gestion des membres</h1>
+    <p class="muted">Gère les accès au compte et invite de nouveaux bénévoles.</p>
+  </div>
+  <form method="post" action="{{ url_for('admin.create_invitation') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="button button-primary">＋ Créer un lien d’invitation</button>
+  </form>
+</section>
+
+<section class="panel admin-panel">
+  <div class="section-title-row"><div><h2>Membres du club</h2><p class="muted small">Les membres gèrent l’inventaire. Les administrateurs gèrent également les comptes.</p></div><strong>{{ users|length }} compte{{ '' if users|length == 1 else 's' }}</strong></div>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th>Nom</th><th>Login</th><th>Rôle</th><th>État</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for user in users %}
+        <tr>
+          <td><strong>{{ user.name }}</strong>{% if user.id == current_user.id %}<span class="admin-you"> (toi)</span>{% endif %}<small>Créé le {{ user.created_at|localdatetime('%d/%m/%Y') }}</small></td>
+          <td>{{ user.login }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin.change_role', user_id=user.id) }}" class="admin-inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="role" aria-label="Rôle de {{ user.name }}">
+                <option value="member" {% if user.role == 'member' %}selected{% endif %}>Membre</option>
+                <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Administrateur</option>
+              </select>
+              <button class="button button-secondary button-small" type="submit">Enregistrer</button>
+            </form>
+          </td>
+          <td><span class="admin-status {{ 'is-active' if user.is_active_user else 'is-inactive' }}">{{ 'Actif' if user.is_active_user else 'Désactivé' }}</span></td>
+          <td>
+            {% if user.id != current_user.id %}
+            <form method="post" action="{{ url_for('admin.toggle_member_active', user_id=user.id) }}" class="admin-inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="button {{ 'button-quiet' if user.is_active_user else 'button-secondary' }} button-small" type="submit">{{ 'Désactiver' if user.is_active_user else 'Réactiver' }}</button>
+            </form>
+            {% else %}<span class="muted small">Compte courant</span>{% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Aucun membre.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel admin-panel admin-invitations-panel">
+  <div class="section-title-row"><div><h2>Liens d’invitation</h2><p class="muted small">Chaque lien est individuel, utilisable une seule fois et valable 7 jours.</p></div></div>
+  {% if invitation_rows %}
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th>Créé le</th><th>Par</th><th>Expire le</th><th>État</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for invitation, invitation_status in invitation_rows %}
+        <tr>
+          <td>{{ invitation.created_at|localdatetime }}</td>
+          <td>{{ invitation.created_by.name if invitation.created_by else 'Compte supprimé' }}</td>
+          <td>{{ invitation.expires_at|localdatetime }}</td>
+          <td>
+            {% if invitation_status == 'Utilisé' %}<span class="admin-status is-used">Utilisé</span>
+            {% elif invitation_status == 'Révoqué' %}<span class="admin-status is-inactive">Révoqué</span>
+            {% elif invitation_status == 'Expiré' %}<span class="admin-status is-inactive">Expiré</span>
+            {% else %}<span class="admin-status is-active">En attente</span>{% endif %}
+          </td>
+          <td>
+            {% if invitation_status == 'En attente' %}
+            <form method="post" action="{{ url_for('admin.cancel_invitation', invitation_id=invitation.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="button button-quiet button-small" type="submit">Révoquer</button>
+            </form>
+            {% else %}<span class="muted small">—</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted small">Aucun lien d’invitation créé pour le moment.</p>{% endif %}
+  <p class="fine-print">Le lien complet n’est affiché qu’à sa création. S’il est perdu, révoque-le ici et crée-en un nouveau. Les mots de passe et les jetons bruts ne sont pas enregistrés dans la base.</p>
+</section>
+{% endblock %}

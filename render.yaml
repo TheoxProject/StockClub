@@ -5,7 +5,7 @@ services:
     plan: free
     region: frankfurt
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT run:app
+    startCommand: python -m flask --app run.py db upgrade && exec gunicorn --bind 0.0.0.0:$PORT run:app
     healthCheckPath: /health
     autoDeploy: true
     envVars:

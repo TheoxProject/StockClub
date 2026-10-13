@@ -18,9 +18,18 @@ class User(UserMixin, db.Model):
     login = db.Column(db.String(80), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(256), nullable=False)
     is_active_user = db.Column(db.Boolean, nullable=False, default=True)
+    role = db.Column(db.String(20), nullable=False, default="member", server_default="member", index=True)
     failed_login_attempts = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     locked_until = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
+
+    @property
+    def role_label(self) -> str:
+        return "Administrateur" if self.is_admin else "Membre"
 
     @property
     def is_active(self):
@@ -123,3 +132,19 @@ class StockMovement(db.Model):
 
     item = db.relationship("Item", back_populates="movements")
     user = db.relationship("User")
+
+
+class Invitation(db.Model):
+    """One-use invitation. Only a hash of the token is persisted."""
+
+    __tablename__ = "invitations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    used_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])

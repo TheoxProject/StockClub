@@ -70,3 +70,30 @@ button, a, select, input, textarea { pointer-events: auto; }
 .photo-field .photo-native-input, .photo-field input[type=file].photo-native-input{display:block;position:static;opacity:1;z-index:auto;width:100%;height:auto;min-height:48px;padding:10px;border:1px solid #c9d5cb;border-radius:11px;background:white;color:var(--ink);font-size:16px}
 .photo-native-input::file-selector-button{background:#e8f0e9;color:#16372f;border:0;border-radius:8px;padding:10px;margin-right:12px;font-weight:700}
 .form-feedback:not([hidden]){padding:11px 13px;border-radius:10px;background:#fff0e9;color:#8b302b;font-size:14px}
+
+
+/* Role-based member administration */
+.mobile-nav-admin{grid-template-columns:repeat(4,minmax(0,1fr))}
+.admin-page-heading{align-items:center}
+.admin-page-heading form{margin:0;flex-shrink:0}
+.admin-panel{margin-bottom:20px;padding:22px}
+.admin-panel .section-title-row{align-items:center;gap:16px;flex-wrap:wrap}
+.admin-panel .section-title-row p{margin:5px 0 0}
+.admin-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.admin-table{width:100%;border-collapse:collapse;min-width:720px;font-size:13px}
+.admin-table th,.admin-table td{padding:13px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
+.admin-table th{font-size:11px;letter-spacing:.04em;color:var(--muted);text-transform:uppercase;background:#fafbf9}
+.admin-table td small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.admin-inline-form{display:flex;align-items:center;gap:6px;margin:0;flex-wrap:wrap}
+.admin-inline-form select{min-height:35px;border:1px solid #dce3dc;border-radius:9px;background:white;padding:6px 8px;color:var(--ink);font-size:12px}
+.admin-status{display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;font-weight:750;font-size:11px;white-space:nowrap}
+.admin-status.is-active{background:#e2f1e4;color:#2c6941}
+.admin-status.is-inactive{background:#f7e7e3;color:#983c36}
+.admin-status.is-used{background:#e8eff4;color:#34586b}
+.admin-you{color:var(--muted);font-size:11px}
+.admin-invitations-panel .fine-print{margin:17px 0 0}
+.admin-invitation-created{max-width:760px;margin:0 auto}
+.admin-invitation-created .panel{padding:28px}
+.admin-link-label{display:block;font-size:12px;font-weight:750;margin:20px 0 7px}
+.admin-invitation-url{width:100%;border:1px solid #dce3dc;border-radius:10px;padding:12px;background:#f8faf7;color:var(--ink);font-size:13px;overflow-wrap:anywhere;resize:vertical}
+@media(max-width:760px){.admin-page-heading{display:flex;align-items:stretch;flex-direction:column;gap:15px}.admin-page-heading form,.admin-page-heading form .button{width:100%}.admin-panel{padding:14px}.admin-panel .section-title-row strong{font-size:12px}.admin-table{min-width:700px}.admin-invitation-created .panel{padding:19px}.mobile-nav-admin a{font-size:9px}}

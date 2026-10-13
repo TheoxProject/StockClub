@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Lien d’invitation créé{% endblock %}
+{% block content %}
+<section class="form-page admin-invitation-created">
+  <a class="back-link" href="{{ url_for('admin.members') }}">← Retour à la gestion des membres</a>
+  <div class="panel">
+    <span class="eyebrow">INVITATION CRÉÉE</span>
+    <h1>Transmettre ce lien au bénévole</h1>
+    <p class="muted">Ce lien peut être utilisé une seule fois et expirera le {{ expires_at|localdatetime }}. Il ne sera plus affiché après avoir quitté cette page.</p>
+    <label for="invitation-url" class="admin-link-label">Lien personnel d’inscription</label>
+    <textarea id="invitation-url" class="admin-invitation-url" rows="4" readonly onclick="this.select()">{{ invitation_url }}</textarea>
+    <p class="fine-print">Transmets ce lien uniquement au bénévole concerné. Si tu le perds, retourne au panneau Membres et génère un nouveau lien.</p>
+    <div class="form-actions"><a href="{{ url_for('admin.members') }}" class="button button-primary">Terminé</a></div>
+  </div>
+</section>
+{% endblock %}

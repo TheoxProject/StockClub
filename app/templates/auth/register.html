@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Créer un compte{% endblock %}
+{% block content %}
+<section class="login-layout">
+  <div class="login-pitch">
+    <span class="eyebrow">REJOINDRE L’ÉQUIPE</span>
+    <h1>Le matériel du club.<br><span>En équipe.</span></h1>
+    <p>Crée ton compte personnel grâce au lien d’invitation transmis par un administrateur.</p>
+    <div class="login-points"><span>✓ Un compte personnel</span><span>✓ Inventaire partagé</span><span>✓ Accès depuis ton téléphone</span></div>
+  </div>
+  <div class="login-card">
+    <div class="login-card-icon" aria-hidden="true">＋</div>
+    <h2>Créer un compte</h2>
+    <p class="muted">Ce lien ne peut servir qu’une seule fois.</p>
+    <form method="post" action="{{ url_for('auth.register_invitation', token=invitation_token) }}" class="stack-form" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="name">Nom affiché</label>
+      <input id="name" name="name" type="text" autocomplete="name" required maxlength="120" placeholder="Ex. Camille Martin" value="{{ request.form.get('name', '') }}">
+      <label for="login">Nom de login</label>
+      <input id="login" name="login" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="80" pattern="[^\s@]+" title="Sans espace ni adresse e-mail" placeholder="Ex. camille.martin" value="{{ request.form.get('login', '') }}">
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required placeholder="6 caractères minimum">
+      <label for="password_confirmation">Confirmer le mot de passe</label>
+      <input id="password_confirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="6" maxlength="128" required placeholder="Saisis-le à nouveau">
+      <button class="button button-primary button-large button-full" type="submit">Créer mon compte <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="fine-print">Tu as déjà un compte ? <a class="text-link" href="{{ url_for('auth.login') }}">Retour à la connexion</a>.</p>
+  </div>
+</section>
+{% endblock %}

@@ -1,12 +1,12 @@
-# Déploiement Stock Club v1.3 (Render + Neon + Cloudflare R2)
+# Déploiement Stock Club (Render + Neon PostgreSQL + Neon Object Storage)
 
-Ce guide déploie l'application Flask sur Render, PostgreSQL sur Neon et les photos sur Cloudflare R2.
+Ce guide déploie l’application Flask sur Render, PostgreSQL sur Neon et les photos sur Neon Object Storage (compatible S3).
 
 ## Important avant de déployer
 
-La base SQLite utilisée en local et les photos du dossier `instance/uploads/` ne sont **pas copiées automatiquement** vers Neon/R2. Si tu as déjà créé des données réelles à conserver, arrête-toi avant l'étape Neon et prévois leur migration. Pour un démarrage vierge, continue ci-dessous.
+La base SQLite utilisée en local et les photos du dossier `instance/uploads/` ne sont **pas copiées automatiquement** vers Neon/Object Storage. Si tu as déjà créé des données réelles à conserver, arrête-toi avant l'étape Neon et prévois leur migration. Pour un démarrage vierge, continue ci-dessous.
 
-Le plan Render gratuit sert à valider le déploiement : il se met en veille après 15 minutes d'inactivité et le réveil peut prendre environ une minute. Son disque est éphémère ; les données doivent donc rester dans Neon et R2. Pour un usage associatif opérationnel sans attente au premier accès, envisager une instance web payante. Voir https://render.com/docs/free.
+Le plan Render gratuit sert à valider le déploiement : il se met en veille après 15 minutes d'inactivité et le réveil peut prendre environ une minute. Son disque est éphémère ; les données doivent donc rester dans Neon (base de données et stockage objet). Pour un usage associatif opérationnel sans attente au premier accès, envisager une instance web payante. Voir https://render.com/docs/free.
 
 ## 1. Préparer le dépôt GitHub
 
@@ -59,17 +59,17 @@ Remove-Item Env:DATABASE_URL
 Remove-Item Env:FLASK_DEBUG
 ```
 
-`db upgrade` crée les tables dans Neon et `create-user` ajoute ton compte. Répète `create-user` pour chaque bénévole. Fais bien cette étape après avoir vérifié que `DATABASE_URL` cible Neon, pas le fichier SQLite local.
+`db upgrade` crée ou met à jour les tables dans Neon et `create-user` ajoute ton premier compte. Sur une base vierge, exécute ensuite `python -m flask --app run.py promote-admin monlogin` (remplace `monlogin` par le login créé) pour lui donner les droits d’administrateur. Les membres suivants sont créés via les liens à usage unique du panneau **Membres**. Fais bien cette étape après avoir vérifié que `DATABASE_URL` cible Neon, pas le fichier SQLite local.
 
-## 3. Créer le bucket de photos Cloudflare R2
+## 3. Créer le bucket de photos Neon Object Storage
 
-1. Dans Cloudflare Dashboard, ouvre **Storage & databases → R2 Object Storage** et crée un bucket privé, par exemple `club-stock-photos`.
-2. Pour les données du club, préfère l'option de juridiction EU si elle est disponible pour ton compte/bucket.
-3. Dans R2, crée un token **Object Read & Write** limité à ce bucket.
-4. Copie l'Access Key ID, le Secret Access Key et l'endpoint S3 affiché par Cloudflare. Pour un bucket standard, il ressemble à `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. **Si tu as créé le bucket avec la juridiction EU, l'endpoint doit être `https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com`**. Le secret ne pourra généralement plus être relu après fermeture : conserve-le dans un gestionnaire de mots de passe.
-5. Ne configure pas `S3_PUBLIC_BASE_URL` : l'application générera des URL signées temporaires pour les photos privées.
+1. Dans la console Neon, ouvre **Object Storage** et crée un bucket privé nommé, par exemple, `club-stock-photos`.
+2. Dans la zone **Credentials** du projet/branche concerné, crée un identifiant limité au stockage, avec les permissions de lecture et d’écriture (`storage:read` et `storage:write`).
+3. Conserve l’endpoint S3, l’Access Key ID et la Secret Access Key dans un gestionnaire de mots de passe. Ne publie jamais ces valeurs sur GitHub.
+4. Renseigne la région indiquée par Neon. Dans la configuration utilisée pour ce déploiement, elle est `eu-central-1`.
+5. Laisse le bucket privé et ne configure pas `S3_PUBLIC_BASE_URL` : l’application utilisera des URL signées temporaires pour afficher les photos.
 
-Documentation officielle : https://developers.cloudflare.com/r2/get-started/s3/
+Documentation officielle : https://neon.com/docs/object-storage/overview
 
 ## 4. Créer le service Render
 
@@ -80,24 +80,24 @@ Documentation officielle : https://developers.cloudflare.com/r2/get-started/s3/
 | Clé | Valeur |
 |---|---|
 | `DATABASE_URL` | Chaîne de connexion Neon, avec `sslmode=require` |
-| `S3_ENDPOINT_URL` | Endpoint S3 de ton compte R2 |
+| `S3_ENDPOINT_URL` | Endpoint S3 indiqué par Neon Object Storage |
 | `S3_BUCKET` | `club-stock-photos` (ou le nom choisi) |
-| `S3_ACCESS_KEY_ID` | Access Key ID de R2 |
-| `S3_SECRET_ACCESS_KEY` | Secret Access Key de R2 |
+| `S3_ACCESS_KEY_ID` | Access Key ID créé dans Neon |
+| `S3_SECRET_ACCESS_KEY` | Secret Access Key créé dans Neon |
 
-Les autres réglages importants sont déjà dans `render.yaml` : `SECRET_KEY` est générée par Render, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `REQUIRE_OBJECT_STORAGE=1` et le service écoute le port Render.
+Les autres réglages importants sont déjà dans `render.yaml` : `SECRET_KEY` est générée par Render, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `REQUIRE_OBJECT_STORAGE=1` et le service écoute le port Render. Après la mise à jour des rôles, le premier compte déjà présent dans la base devient administrateur. Il pourra créer des liens d’invitation individuels depuis le panneau **Membres**. Chaque lien est à usage unique et expire après sept jours. Le fichier `render.yaml` lance `flask db upgrade` au démarrage pour appliquer les nouvelles migrations sur le forfait gratuit de Render, où les commandes de pré-déploiement et le shell ne sont pas disponibles.
 
 Réglages manuels si tu n'utilises pas Blueprint :
 
 - Runtime : Python 3
 - Region : Frankfurt (si disponible, proche de Neon EU)
 - Build command : `pip install -r requirements.txt`
-- Start command : `gunicorn --bind 0.0.0.0:$PORT run:app`
+- Start command : `python -m flask --app run.py db upgrade && exec gunicorn --bind 0.0.0.0:$PORT run:app`
 - Health check path : `/health`
 - Python version : `3.12.11`
-- Variables d'environnement : celles du tableau ci-dessus, plus `SECRET_KEY` (une valeur aléatoire d'au moins 32 caractères), `S3_REGION=auto`, `REQUIRE_OBJECT_STORAGE=1`, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `FLASK_DEBUG=0`.
+- Variables d'environnement : celles du tableau ci-dessus, plus `SECRET_KEY` (une valeur aléatoire d’au moins 32 caractères), `S3_REGION=eu-central-1` (ou la région donnée par Neon), `REQUIRE_OBJECT_STORAGE=1`, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `FLASK_DEBUG=0`.
 
-La base Neon doit avoir été initialisée à l'étape 2 avant le premier déploiement. Les migrations ne sont pas lancées automatiquement au démarrage pour éviter une migration implicite à chaque redémarrage.
+La base Neon doit avoir été initialisée avant le premier déploiement. Le fichier `render.yaml` exécute `flask db upgrade` au démarrage : les migrations déjà appliquées sont ignorées, et les nouvelles migrations sont exécutées avant le lancement de Gunicorn. Cela permet d’appliquer automatiquement la migration des rôles avec l’offre gratuite de Render, qui ne propose pas de shell ni de commande de pré-déploiement.
 
 ## 5. Tester le déploiement
 
@@ -107,7 +107,7 @@ Quand Render affiche **Live**, ouvre l'URL `https://...onrender.com` fournie par
 2. Crée une catégorie, une sous-catégorie et une fiche de test avec une photo.
 3. Ouvre `/health` : le résultat attendu est `{"status":"ok"}`.
 4. Déconnecte-toi puis reconnecte-toi. Teste le même objet depuis un second téléphone.
-5. Dans Cloudflare R2, vérifie qu'un fichier `.webp` est apparu dans le bucket.
+5. Dans Neon Object Storage, vérifie qu’un fichier `.webp` est apparu dans le bucket.
 6. Redéploie une fois, puis vérifie que les données et la photo sont toujours là. Cette vérification confirme qu'elles ne sont pas dépendantes du disque éphémère Render.
 
 ## 6. Mises à jour suivantes
@@ -120,4 +120,4 @@ Une fois GitHub connecté à Render, un `git push` sur la branche déployée dé
 - Render Python : https://render.com/docs/python-version
 - Render services gratuits : https://render.com/docs/free
 - Neon : https://neon.com/docs/get-started/connect-neon
-- Cloudflare R2 S3 : https://developers.cloudflare.com/r2/get-started/s3/
+- Neon Object Storage : https://neon.com/docs/object-storage/overview
