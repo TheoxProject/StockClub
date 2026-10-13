@@ -24,7 +24,7 @@ services:
       - key: S3_SECRET_ACCESS_KEY
         sync: false
       - key: S3_REGION
-        value: auto
+        value: eu-central-1
       - key: REQUIRE_OBJECT_STORAGE
         value: "1"
       - key: COOKIE_SECURE

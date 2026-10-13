@@ -1,0 +1,22 @@
+<div class="section-title-row"><div><h2>Le matériel</h2><span class="muted small" id="result-count">{{ items|length }} résultat{% if items|length > 1 %}s{% endif %}</span></div><a class="text-link desktop-export" href="{{ url_for('inventory.export_csv') }}">Exporter la liste ↗</a></div>
+<div class="item-grid">
+  {% for item in items %}
+    {% set out_quantity = outstanding_by_item.get(item.id, 0) %}
+    <a class="item-card" href="{{ url_for('inventory.item_detail', item_id=item.id) }}">
+      <div class="item-photo-wrap">
+        {% if item.photo_key %}<img class="item-photo" src="{{ photo_url(item.photo_key) }}" alt="Photo de {{ item.name }}" loading="lazy">{% else %}<div class="photo-placeholder" aria-hidden="true">▧</div>{% endif %}
+        <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
+      </div>
+      <div class="item-card-body">
+        <span class="category-path">{{ item.category.full_path }}</span>
+        <h3>{{ item.name }}</h3>
+        <p class="item-description">{{ item.description or 'Aucune description renseignée.' }}</p>
+        <div class="item-card-bottom"><span class="stock-amount"><strong>{{ item.quantity }}</strong> disponible{% if item.quantity > 1 %}s{% endif %}</span><span class="item-arrow" aria-hidden="true">↗</span></div>
+        {% if out_quantity > 0 %}<span class="out-quantity-note">↗ {{ out_quantity }} unité{% if out_quantity > 1 %}s{% endif %} encore à l’extérieur</span>{% endif %}
+        {% if item.location %}<span class="item-location">⌖ {{ item.location }}</span>{% endif %}
+      </div>
+    </a>
+  {% else %}
+    <div class="empty-state inventory-empty"><span class="empty-icon" aria-hidden="true">▦</span><h3>{% if has_filters %}Aucun résultat{% else %}L’inventaire est encore vide{% endif %}</h3><p>{% if has_filters %}Essaie de modifier ta recherche ou tes filtres.{% else %}Ajoute le premier objet pour commencer à recenser le matériel du club.{% endif %}</p>{% if not has_filters %}<a class="button button-primary" href="{{ url_for('inventory.create_item') }}">Ajouter le premier objet</a>{% endif %}</div>
+  {% endfor %}
+</div>

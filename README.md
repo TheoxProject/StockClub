@@ -11,9 +11,11 @@ Sports clubs often manage equipment through spreadsheets, paper lists, or inform
 ## Features
 
 - **Flexible category tree:** create, rename, move, and organise branches at any depth.
-- **Visual inventory:** equipment records include a photo, description, quantity, condition, and storage location.
+- **Visual inventory:** equipment records include a photo, description, available quantity, condition, and storage location.
 - **Photo upload:** validates and re-encodes supported images as WebP; EXIF metadata is removed during conversion.
-- **Borrow/return history:** records quantity changes, reason, timestamp, and the responsible volunteer.
+- **Live search and filters:** search updates progressively while typing; category, availability, and minimum available quantity can be combined. Location and condition filters are intentionally omitted.
+- **Borrow/return tracking:** each outing records the connected volunteer, the quantity initially taken out, and the outstanding quantity. Partial and complete returns are linked to their original outing; no expected return date is required.
+- **Historical preservation on deletion:** only administrators can permanently delete an inventory item. Members see a disabled “Supprimer l’objet — Réservé aux administrateurs” action. Deletion is blocked while any quantity is still out; movement/loan history is kept with an item-name snapshot, and the photo object is deleted when no longer referenced.
 - **Role-based access:** members manage the inventory; administrators can manage member accounts and issue one-use invitation links.
 - **Mobile-friendly UI:** responsive layout and installable PWA manifest.
 - **Storage separation:** SQL database for structured data and Neon Object Storage (S3-compatible) for photos in hosted deployments.
@@ -114,7 +116,7 @@ python -m pytest -q
 
 ## Deployment
 
-A sample Render Blueprint is included in `render.yaml`, and `DEPLOYMENT.md` describes a deployment using Render, Neon PostgreSQL, and Neon Object Storage.
+A sample Render Blueprint is included in `render.yaml`, and `DEPLOYMENT.md` describes a deployment using Render, Neon PostgreSQL, and Neon Object Storage. Version 1.4 adds migration `0004_live_search_loans`; take a Neon backup before deploying and let Render apply migrations using its configured start command.
 
 Before deploying:
 

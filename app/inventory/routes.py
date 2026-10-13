@@ -11,8 +11,9 @@ from flask_login import current_user, login_required
 from sqlalchemy import or_
 
 from . import bp
+from ..admin.decorators import admin_required
 from ..extensions import db
-from ..models import Category, Item, StockMovement
+from ..models import Borrowing, BorrowingEvent, Category, Item, StockMovement, utcnow
 from ..storage import InvalidImage, delete_photo, save_photo
 
 CONDITIONS = ["Bon état", "À contrôler", "À réparer", "Hors service"]
@@ -50,43 +51,144 @@ def _int_field(name: str, label: str, minimum: int = 0):
     return value
 
 
-@bp.get("/")
-@login_required
-def index():
-    search = request.args.get("q", "").strip()
-    category_raw = request.args.get("category", "").strip()
-    condition = request.args.get("condition", "").strip()
+def _outstanding_subquery():
+    return (
+        db.session.query(
+            Borrowing.item_id.label("item_id"),
+            db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned).label("outstanding_quantity"),
+        )
+        .filter(
+            Borrowing.item_id.isnot(None),
+            Borrowing.quantity_out > Borrowing.quantity_returned,
+        )
+        .group_by(Borrowing.item_id)
+        .subquery()
+    )
 
-    query = Item.query.join(Category)
+
+def _build_inventory_query():
+    outstanding = _outstanding_subquery()
+    outstanding_quantity = db.func.coalesce(outstanding.c.outstanding_quantity, 0)
+    query = Item.query.join(Category).outerjoin(outstanding, outstanding.c.item_id == Item.id)
+    search = request.args.get("q", "").strip()[:120]
     if search:
         pattern = f"%{search}%"
-        query = query.filter(or_(Item.name.ilike(pattern), Item.description.ilike(pattern), Category.name.ilike(pattern), Item.location.ilike(pattern)))
+        # No location or condition filtering: search is restricted to useful identifiers/text.
+        query = query.filter(or_(Item.name.ilike(pattern), Item.description.ilike(pattern), Category.name.ilike(pattern)))
+
+    category_raw = request.args.get("category", "").strip()
     selected_category = None
     if category_raw:
         try:
             selected_category = db.session.get(Category, int(category_raw))
-        except ValueError:
+        except (TypeError, ValueError):
             selected_category = None
         if selected_category:
             query = query.filter(Item.category_id.in_(_descendant_ids(selected_category)))
-    if condition in CONDITIONS:
-        query = query.filter(Item.condition == condition)
 
+    availability = request.args.get("availability", "").strip()
+    if availability == "available":
+        query = query.filter(Item.quantity > 0, outstanding_quantity == 0)
+    elif availability == "partial":
+        query = query.filter(Item.quantity > 0, outstanding_quantity > 0)
+    elif availability == "out":
+        query = query.filter(Item.quantity == 0, outstanding_quantity > 0)
+    elif availability == "empty":
+        query = query.filter(Item.quantity == 0, outstanding_quantity == 0)
+    else:
+        availability = ""
+
+    quantity_min_raw = request.args.get("quantity_min", "").strip()
+    quantity_min = None
+    if quantity_min_raw:
+        try:
+            quantity_min = int(quantity_min_raw)
+        except ValueError:
+            quantity_min = None
+        if quantity_min is not None and 0 <= quantity_min <= 100000:
+            query = query.filter(Item.quantity >= quantity_min)
+        else:
+            quantity_min = None
+
+    return query, search, selected_category, availability, quantity_min
+
+
+def _render_inventory_results(items, outstanding_by_item, *, search, selected_category, availability, quantity_min):
+    has_filters = bool(search or selected_category or availability or quantity_min is not None)
+    return render_template(
+        "inventory/_item_results.html",
+        items=items,
+        outstanding_by_item=outstanding_by_item,
+        has_filters=has_filters,
+    )
+
+
+@bp.get("/")
+@login_required
+def index():
+    query, search, selected_category, availability, quantity_min = _build_inventory_query()
     items = query.order_by(Item.name.asc()).all()
+    if items:
+        rows = (
+            db.session.query(
+                Borrowing.item_id,
+                db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned),
+            )
+            .filter(
+                Borrowing.item_id.in_([item.id for item in items]),
+                Borrowing.quantity_out > Borrowing.quantity_returned,
+            )
+            .group_by(Borrowing.item_id)
+            .all()
+        )
+        outstanding_by_item = {item_id: int(quantity or 0) for item_id, quantity in rows}
+    else:
+        outstanding_by_item = {}
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        response = make_response(_render_inventory_results(
+            items, outstanding_by_item, search=search,
+            selected_category=selected_category, availability=availability,
+            quantity_min=quantity_min,
+        ))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     total_references = Item.query.count()
     total_units = db.session.query(db.func.coalesce(db.func.sum(Item.quantity), 0)).scalar()
     attention_count = Item.query.filter(Item.condition.in_(["À contrôler", "À réparer", "Hors service"])).count()
     return render_template(
         "inventory/index.html",
         items=items,
+        outstanding_by_item=outstanding_by_item,
         categories=_category_options(),
         selected_category=selected_category,
         search=search,
-        condition=condition,
+        availability=availability,
+        quantity_min=quantity_min if quantity_min is not None else "",
+        has_filters=bool(search or selected_category or availability or quantity_min is not None),
         total_references=total_references,
         total_units=total_units,
         attention_count=attention_count,
-        conditions=CONDITIONS,
+    )
+
+
+@bp.get("/loans")
+@login_required
+def loans():
+    active_loans = (
+        Borrowing.query
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned)
+        .filter(Borrowing.item_id.isnot(None))
+        .order_by(Borrowing.created_at.asc(), Borrowing.id.asc())
+        .all()
+    )
+    recent_events = BorrowingEvent.query.order_by(BorrowingEvent.created_at.desc(), BorrowingEvent.id.desc()).limit(100).all()
+    return render_template(
+        "inventory/loans.html",
+        active_loans=active_loans,
+        recent_events=recent_events,
+        total_outstanding=sum(loan.remaining_quantity for loan in active_loans),
     )
 
 
@@ -133,7 +235,7 @@ def create_item():
         )
         db.session.add(item)
         db.session.flush()
-        db.session.add(StockMovement(item=item, user=current_user, delta=quantity, quantity_after=quantity, note="Stock initial"))
+        db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user, delta=quantity, quantity_after=quantity, note="Stock initial"))
         db.session.commit()
         flash(f"« {item.name} » a été ajouté à l’inventaire.", "success")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
@@ -145,7 +247,22 @@ def create_item():
 @login_required
 def item_detail(item_id):
     item = db.get_or_404(Item, item_id)
-    return render_template("inventory/item_detail.html", item=item, conditions=CONDITIONS)
+    active_borrowings = (
+        Borrowing.query.filter_by(item_id=item.id)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned)
+        .order_by(Borrowing.created_at.asc(), Borrowing.id.asc()).all()
+    )
+    recent_loan_events = (
+        BorrowingEvent.query.filter_by(item_id=item.id)
+        .order_by(BorrowingEvent.created_at.desc(), BorrowingEvent.id.desc()).limit(30).all()
+    )
+    outstanding_quantity = sum(loan.remaining_quantity for loan in active_borrowings)
+    return render_template(
+        "inventory/item_detail.html", item=item, conditions=CONDITIONS,
+        active_borrowings=active_borrowings,
+        outstanding_quantity=outstanding_quantity,
+        recent_loan_events=recent_loan_events,
+    )
 
 
 @bp.route("/items/<int:item_id>/edit", methods=["GET", "POST"])
@@ -200,57 +317,168 @@ def edit_item(item_id):
 @bp.post("/items/<int:item_id>/adjust-stock")
 @login_required
 def adjust_stock(item_id):
+    """Record a new outing. Returns must be linked to a particular active loan."""
     item = db.get_or_404(Item, item_id)
-    movement_type = request.form.get("movement_type", "").strip().lower()
-    note = request.form.get("note", "").strip()
+    movement_type = request.form.get("movement_type", "emprunt").strip().lower()
+    if movement_type == "retour":
+        flash("Pour enregistrer un retour, sélectionne l’emprunt correspondant dans « Matériel sorti ».", "error")
+        return redirect(url_for("inventory.loans"))
+    if movement_type not in {"", "emprunt"}:
+        flash("Type de mouvement non reconnu.", "error")
+        return redirect(url_for("inventory.item_detail", item_id=item.id))
 
-    # Support the previous signed-delta form for compatibility with older clients.
-    explicit_movement_type = movement_type in {"emprunt", "retour"}
-    if explicit_movement_type:
+    raw_amount = request.form.get("quantity", "").strip()
+    if raw_amount:
         try:
-            amount = int(request.form.get("quantity", ""))
+            amount = int(raw_amount)
         except (TypeError, ValueError):
-            flash("Saisis une quantité entière à emprunter ou à rendre.", "error")
+            flash("Saisis une quantité entière à sortir du stock.", "error")
             return redirect(url_for("inventory.item_detail", item_id=item.id))
-        if amount < 1 or amount > 100000:
-            flash("La quantité doit être comprise entre 1 et 100 000.", "error")
-            return redirect(url_for("inventory.item_detail", item_id=item.id))
-        delta = -amount if movement_type == "emprunt" else amount
-        movement_label = "Emprunt" if movement_type == "emprunt" else "Retour"
     else:
+        # Compatibility for a legacy signed-delta form: negative means outing.
+        # A positive delta must never silently become another outing; returns
+        # must identify the active loan they close or reduce.
         try:
-            delta = int(request.form.get("delta", ""))
+            legacy_delta = int(request.form.get("delta", ""))
         except (TypeError, ValueError):
-            flash("Choisis un emprunt ou un retour, avec une quantité entière.", "error")
+            flash("Saisis une quantité entière à sortir du stock.", "error")
             return redirect(url_for("inventory.item_detail", item_id=item.id))
-        if delta == 0 or abs(delta) > 100000:
-            flash("La quantité doit être différente de zéro et rester raisonnable.", "error")
-            return redirect(url_for("inventory.item_detail", item_id=item.id))
-        movement_label = "Retour" if delta > 0 else "Emprunt"
-
+        if legacy_delta >= 0:
+            flash("Un retour doit être associé à un emprunt dans « Matériel sorti ».", "error")
+            return redirect(url_for("inventory.loans"))
+        amount = -legacy_delta
+    if amount < 1 or amount > 100000:
+        flash("La quantité doit être comprise entre 1 et 100 000.", "error")
+        return redirect(url_for("inventory.item_detail", item_id=item.id))
+    note = request.form.get("note", "").strip()
     if len(note) > 240:
         flash("Le commentaire ne doit pas dépasser 240 caractères.", "error")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
 
-    # A conditional update prevents two simultaneous volunteers from overwriting
-    # each other's stock changes. SQL expression arithmetic is atomic in SQL.
-    updated = Item.query.filter_by(id=item.id).filter(Item.quantity + delta >= 0).update(
-        {Item.quantity: Item.quantity + delta, Item.updated_by_id: current_user.id, Item.updated_at: datetime.now(timezone.utc)},
+    # The guarded arithmetic update avoids negative stock when two volunteers act at once.
+    updated = Item.query.filter_by(id=item.id).filter(Item.quantity >= amount).update(
+        {Item.quantity: Item.quantity - amount, Item.updated_by_id: current_user.id, Item.updated_at: utcnow()},
         synchronize_session=False,
     )
     if updated != 1:
         db.session.rollback()
-        flash("Le stock ne peut pas devenir négatif ou a changé en même temps. Recharge la page et réessaie.", "error")
+        flash("La quantité disponible est insuffisante ou le stock vient de changer. Recharge la page puis réessaie.", "error")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
+
     db.session.refresh(item)
-    if explicit_movement_type:
-        movement_note = f"{movement_label} · {note}" if note else movement_label
-    else:
-        movement_note = note or movement_label
-    db.session.add(StockMovement(item=item, user=current_user, delta=delta, quantity_after=item.quantity, note=movement_note))
+    borrowing = Borrowing(
+        item=item,
+        item_name_snapshot=item.name,
+        user=current_user,
+        quantity_out=amount,
+        quantity_returned=0,
+        note=note,
+    )
+    db.session.add(borrowing)
+    db.session.flush()
+    db.session.add(BorrowingEvent(
+        borrowing=borrowing, item=item, item_name_snapshot=item.name,
+        user=current_user, event_type="sortie", quantity=amount, note=note,
+    ))
+    movement_note = f"Emprunt · {note}" if note else "Emprunt"
+    db.session.add(StockMovement(
+        item=item, item_name_snapshot=item.name, user=current_user,
+        delta=-amount, quantity_after=item.quantity, note=movement_note,
+    ))
     db.session.commit()
-    flash(f"Retour enregistré : {item.quantity} unité{'s' if item.quantity > 1 else ''} en stock." if delta > 0 else f"Emprunt enregistré : {item.quantity} unité{'s' if item.quantity > 1 else ''} en stock.", "success")
+    flash(f"Sortie enregistrée : {amount} unité{'s' if amount > 1 else ''}. Il reste {item.quantity} unité{'s' if item.quantity > 1 else ''} disponible{'s' if item.quantity > 1 else ''}.", "success")
     return redirect(url_for("inventory.item_detail", item_id=item.id))
+
+
+@bp.post("/loans/<int:loan_id>/return")
+@login_required
+def return_loan(loan_id):
+    loan = Borrowing.query.filter_by(id=loan_id).with_for_update().first_or_404()
+    if loan.item_id is None or loan.item is None:
+        flash("L’objet associé à cet emprunt n’existe plus. L’historique a été conservé.", "error")
+        return redirect(url_for("inventory.loans"))
+    item = Item.query.filter_by(id=loan.item_id).with_for_update().first()
+    if item is None:
+        flash("Le matériel associé à cet emprunt n’existe plus.", "error")
+        return redirect(url_for("inventory.loans"))
+
+    try:
+        amount = _int_field("quantity", "La quantité à rendre", minimum=1)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("inventory.loans"))
+    if amount > loan.remaining_quantity:
+        flash(f"Tu ne peux pas rendre plus que les {loan.remaining_quantity} unité(s) encore à l’extérieur.", "error")
+        return redirect(url_for("inventory.loans"))
+    note = request.form.get("note", "").strip()
+    if len(note) > 240:
+        flash("Le commentaire ne doit pas dépasser 240 caractères.", "error")
+        return redirect(url_for("inventory.loans"))
+
+    item.quantity += amount
+    item.updated_by = current_user
+    item.updated_at = utcnow()
+    loan.quantity_returned += amount
+    if loan.remaining_quantity == 0:
+        loan.closed_at = utcnow()
+
+    db.session.add(BorrowingEvent(
+        borrowing=loan, item=item, item_name_snapshot=loan.item_name_snapshot,
+        user=current_user, event_type="retour", quantity=amount, note=note,
+    ))
+    movement_note = f"Retour · {note}" if note else "Retour d’emprunt"
+    db.session.add(StockMovement(
+        item=item, item_name_snapshot=loan.item_name_snapshot, user=current_user,
+        delta=amount, quantity_after=item.quantity, note=movement_note,
+    ))
+    db.session.commit()
+    if loan.remaining_quantity == 0:
+        flash(f"Retour complet enregistré pour « {loan.item_name_snapshot} ».", "success")
+    else:
+        flash(f"Retour partiel enregistré. Il reste {loan.remaining_quantity} unité(s) à l’extérieur.", "success")
+    return redirect(url_for("inventory.loans"))
+
+
+@bp.post("/items/<int:item_id>/delete")
+@login_required
+@admin_required
+def delete_item(item_id):
+    item = db.get_or_404(Item, item_id)
+    open_loan = (
+        Borrowing.query.filter_by(item_id=item.id)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned)
+        .first()
+    )
+    if open_loan:
+        flash(
+            f"Impossible de supprimer « {item.name} » : du matériel est encore à l’extérieur. Enregistre d’abord tous les retours.",
+            "error",
+        )
+        return redirect(url_for("inventory.item_detail", item_id=item.id))
+
+    item_id_value = item.id
+    item_name = item.name
+    photo_key = item.photo_key
+    # Freeze names in every historical record before the live Item row is removed.
+    StockMovement.query.filter_by(item_id=item_id_value).filter(
+        or_(StockMovement.item_name_snapshot.is_(None), StockMovement.item_name_snapshot == "")
+    ).update({StockMovement.item_name_snapshot: item_name}, synchronize_session=False)
+    Borrowing.query.filter_by(item_id=item_id_value).filter(
+        or_(Borrowing.item_name_snapshot.is_(None), Borrowing.item_name_snapshot == "")
+    ).update({Borrowing.item_name_snapshot: item_name}, synchronize_session=False)
+    BorrowingEvent.query.filter_by(item_id=item_id_value).filter(
+        or_(BorrowingEvent.item_name_snapshot.is_(None), BorrowingEvent.item_name_snapshot == "")
+    ).update({BorrowingEvent.item_name_snapshot: item_name}, synchronize_session=False)
+
+    db.session.delete(item)
+    db.session.commit()
+
+    # Only delete the photo object if no other inventory record still refers to it.
+    still_used = Item.query.filter_by(photo_key=photo_key).first() if photo_key else None
+    if photo_key and still_used is None:
+        delete_photo(photo_key)
+    flash(f"« {item_name} » a été supprimé. L’historique des mouvements et emprunts est conservé.", "success")
+    return redirect(url_for("inventory.index"))
 
 
 def _category_parent_from_raw(parent_raw: str) -> Category | None:

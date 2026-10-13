@@ -12,46 +12,103 @@
 
 <section class="stats-grid" aria-label="Résumé de l’inventaire">
   <article class="stat-card"><span class="stat-icon stat-icon-green" aria-hidden="true">▦</span><div><span class="stat-label">Références</span><strong>{{ total_references }}</strong><small>types de matériel</small></div></article>
-  <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">□</span><div><span class="stat-label">Quantité totale</span><strong>{{ total_units }}</strong><small>unités en stock</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">□</span><div><span class="stat-label">Unités disponibles</span><strong>{{ total_units }}</strong><small>hors matériel sorti</small></div></article>
   <article class="stat-card"><span class="stat-icon stat-icon-rose" aria-hidden="true">!</span><div><span class="stat-label">À surveiller</span><strong>{{ attention_count }}</strong><small>références à contrôler ou réparer</small></div></article>
 </section>
 
 <section class="inventory-section">
-  <div class="section-title-row"><div><h2>Le matériel</h2><span class="muted small">{{ items|length }} résultat{% if items|length > 1 %}s{% endif %}</span></div><a class="text-link desktop-export" href="{{ url_for('inventory.export_csv') }}">Exporter la liste ↗</a></div>
-  <form class="filter-panel" method="get" action="{{ url_for('inventory.index') }}">
-    <div class="search-input"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search }}" placeholder="Rechercher un objet, une catégorie…" aria-label="Rechercher"></div>
+  <form id="inventory-filters" class="filter-panel" method="get" action="{{ url_for('inventory.index') }}">
+    <label class="search-input"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search }}" placeholder="Rechercher un objet, une catégorie…" aria-label="Rechercher" autocomplete="off" spellcheck="false"></label>
     <select name="category" aria-label="Filtrer par catégorie">
       <option value="">Toutes les catégories</option>
       {% for category, label in categories %}<option value="{{ category.id }}" {% if selected_category and selected_category.id == category.id %}selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
-    <select name="condition" aria-label="Filtrer par état">
-      <option value="">Tous les états</option>
-      {% for value in conditions %}<option value="{{ value }}" {% if condition == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    <select name="availability" aria-label="Filtrer par disponibilité">
+      <option value="">Toutes les disponibilités</option>
+      <option value="available" {% if availability == 'available' %}selected{% endif %}>Disponible uniquement</option>
+      <option value="partial" {% if availability == 'partial' %}selected{% endif %}>Partiellement sorti</option>
+      <option value="out" {% if availability == 'out' %}selected{% endif %}>Tout sorti</option>
+      <option value="empty" {% if availability == 'empty' %}selected{% endif %}>Quantité à zéro</option>
     </select>
-    <button class="button button-secondary" type="submit">Filtrer</button>
-    {% if search or selected_category or condition %}<a class="button button-quiet" href="{{ url_for('inventory.index') }}">Réinitialiser</a>{% endif %}
+    <label class="quantity-filter"><span>Quantité dispo. min.</span><input type="number" name="quantity_min" min="0" max="100000" step="1" value="{{ quantity_min }}" placeholder="0" aria-label="Quantité disponible minimale"></label>
+    <button class="button button-secondary filter-submit" type="submit">Appliquer</button>
+    <a class="button button-quiet filter-reset {% if not has_filters %}is-hidden{% endif %}" id="filter-reset" href="{{ url_for('inventory.index') }}">Réinitialiser</a>
   </form>
 
-  {% if items %}
-    <div class="item-grid">
-      {% for item in items %}
-        <a class="item-card" href="{{ url_for('inventory.item_detail', item_id=item.id) }}">
-          <div class="item-photo-wrap">
-            {% if item.photo_key %}<img class="item-photo" src="{{ photo_url(item.photo_key) }}" alt="Photo de {{ item.name }}" loading="lazy">{% else %}<div class="photo-placeholder" aria-hidden="true">▧</div>{% endif %}
-            <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
-          </div>
-          <div class="item-card-body">
-            <span class="category-path">{{ item.category.full_path }}</span>
-            <h3>{{ item.name }}</h3>
-            <p class="item-description">{{ item.description or 'Aucune description renseignée.' }}</p>
-            <div class="item-card-bottom"><span class="stock-amount"><strong>{{ item.quantity }}</strong> unité{% if item.quantity > 1 %}s{% endif %}</span><span class="item-arrow" aria-hidden="true">↗</span></div>
-            {% if item.location %}<span class="item-location">⌖ {{ item.location }}</span>{% endif %}
-          </div>
-        </a>
-      {% endfor %}
-    </div>
-  {% else %}
-    <div class="empty-state"><span class="empty-icon" aria-hidden="true">▦</span><h3>{% if search or selected_category or condition %}Aucun résultat{% else %}L’inventaire est encore vide{% endif %}</h3><p>{% if search or selected_category or condition %}Essaie de modifier tes filtres.{% else %}Ajoute le premier objet pour commencer à recenser le matériel du club.{% endif %}</p>{% if not (search or selected_category or condition) %}<a class="button button-primary" href="{{ url_for('inventory.create_item') }}">Ajouter le premier objet</a>{% endif %}</div>
-  {% endif %}
+  <div id="inventory-results" aria-live="polite" aria-busy="false">
+    {% include "inventory/_item_results.html" %}
+  </div>
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const form = document.getElementById('inventory-filters');
+  const results = document.getElementById('inventory-results');
+  const reset = document.getElementById('filter-reset');
+  if (!form || !results) return;
+  let debounceTimer = null;
+  let activeController = null;
+  let requestNumber = 0;
+
+  async function updateResults(delay = 170) {
+    window.clearTimeout(debounceTimer);
+    debounceTimer = window.setTimeout(async () => {
+      const params = new URLSearchParams(new FormData(form));
+      for (const [key, value] of Array.from(params.entries())) {
+        if (!String(value).trim()) params.delete(key);
+      }
+      const query = params.toString();
+      const nextUrl = query ? `${form.action}?${query}` : form.action;
+      window.history.replaceState({}, '', nextUrl);
+      if (reset) reset.classList.toggle('is-hidden', params.size === 0);
+
+      if (activeController) activeController.abort();
+      activeController = new AbortController();
+      const thisRequest = ++requestNumber;
+      results.setAttribute('aria-busy', 'true');
+      results.classList.add('is-loading');
+      try {
+        const response = await fetch(nextUrl, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' },
+          signal: activeController.signal,
+          credentials: 'same-origin'
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const html = await response.text();
+        if (thisRequest === requestNumber) results.innerHTML = html;
+      } catch (error) {
+        if (error.name !== 'AbortError' && thisRequest === requestNumber) {
+          results.innerHTML = '<p class="flash flash-error">La recherche n’a pas pu être actualisée. Réessaie.</p>';
+        }
+      } finally {
+        if (thisRequest === requestNumber) {
+          results.classList.remove('is-loading');
+          results.setAttribute('aria-busy', 'false');
+        }
+      }
+    }, delay);
+  }
+
+  form.addEventListener('submit', event => { event.preventDefault(); updateResults(0); });
+  const search = form.querySelector('input[name="q"]');
+  const quantity = form.querySelector('input[name="quantity_min"]');
+  if (search) search.addEventListener('input', () => updateResults(180));
+  if (quantity) quantity.addEventListener('input', () => updateResults(220));
+  form.querySelectorAll('select').forEach(select => select.addEventListener('change', () => updateResults(0)));
+  if (reset) reset.addEventListener('click', event => {
+    event.preventDefault();
+    form.reset();
+    if (window.location.pathname !== reset.href) window.history.replaceState({}, '', reset.href);
+    updateResults(0);
+  });
+  window.addEventListener('popstate', () => {
+    const params = new URLSearchParams(window.location.search);
+    for (const input of form.elements) {
+      if (input.name) input.value = params.get(input.name) || '';
+    }
+    updateResults(0);
+  });
+})();
+</script>
 {% endblock %}

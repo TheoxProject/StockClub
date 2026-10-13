@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
+from sqlalchemy import event
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .extensions import db, login_manager
@@ -102,11 +103,23 @@ class Item(db.Model):
     category = db.relationship("Category", back_populates="items")
     created_by = db.relationship("User", foreign_keys=[created_by_id])
     updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    # Movements and borrowings are deliberately preserved if an administrator
+    # deletes an item. Their item foreign keys become NULL and their snapshots
+    # keep the former item's name for historical traceability.
     movements = db.relationship(
         "StockMovement",
         back_populates="item",
-        cascade="all, delete-orphan",
         order_by="StockMovement.created_at.desc()",
+    )
+    borrowings = db.relationship(
+        "Borrowing",
+        back_populates="item",
+        order_by="Borrowing.created_at.desc()",
+    )
+    borrowing_events = db.relationship(
+        "BorrowingEvent",
+        back_populates="item",
+        order_by="BorrowingEvent.created_at.desc()",
     )
 
     @property
@@ -123,7 +136,8 @@ class StockMovement(db.Model):
     __tablename__ = "stock_movements"
 
     id = db.Column(db.Integer, primary_key=True)
-    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_name_snapshot = db.Column(db.String(160), nullable=False, default="Objet supprimé")
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     delta = db.Column(db.Integer, nullable=False)
     quantity_after = db.Column(db.Integer, nullable=False)
@@ -131,6 +145,62 @@ class StockMovement(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
     item = db.relationship("Item", back_populates="movements")
+    user = db.relationship("User")
+
+
+@event.listens_for(StockMovement, "before_insert")
+def _stock_movement_snapshot(mapper, connection, target):
+    if not target.item_name_snapshot and target.item is not None:
+        target.item_name_snapshot = target.item.name
+    elif not target.item_name_snapshot:
+        target.item_name_snapshot = "Objet supprimé"
+
+
+class Borrowing(db.Model):
+    """One loan initiated by a connected volunteer; kept after the item is deleted."""
+
+    __tablename__ = "borrowings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_name_snapshot = db.Column(db.String(160), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    quantity_out = db.Column(db.Integer, nullable=False)
+    quantity_returned = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    note = db.Column(db.String(240), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    closed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    item = db.relationship("Item", back_populates="borrowings")
+    user = db.relationship("User")
+    events = db.relationship("BorrowingEvent", back_populates="borrowing", order_by="BorrowingEvent.created_at.asc()")
+
+    @property
+    def remaining_quantity(self) -> int:
+        return max(0, self.quantity_out - self.quantity_returned)
+
+    @property
+    def is_open(self) -> bool:
+        return self.remaining_quantity > 0
+
+
+class BorrowingEvent(db.Model):
+    """Immutable ledger entry recording an actual outing or return."""
+
+    __tablename__ = "borrowing_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    borrowing_id = db.Column(db.Integer, db.ForeignKey("borrowings.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_name_snapshot = db.Column(db.String(160), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type = db.Column(db.String(20), nullable=False)  # "sortie" or "retour"
+    quantity = db.Column(db.Integer, nullable=False)
+    note = db.Column(db.String(240), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    borrowing = db.relationship("Borrowing", back_populates="events")
+    item = db.relationship("Item", back_populates="borrowing_events")
     user = db.relationship("User")
 
 

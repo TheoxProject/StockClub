@@ -28,7 +28,6 @@ def _s3_client():
     region = current_app.config.get("S3_REGION")
     if not region or region == "auto":
         region = "eu-central-1"
-
     return boto3.client(
         "s3",
         endpoint_url=current_app.config["S3_ENDPOINT_URL"],

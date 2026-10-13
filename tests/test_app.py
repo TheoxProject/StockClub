@@ -87,11 +87,11 @@ def test_create_category_and_inventory_item(logged_in_client, app):
 
 
 def test_stock_adjustment_has_audit_record(logged_in_client, app):
+    from app.models import Borrowing, User
     with app.app_context():
         category = Category(name="Signalétique")
         db.session.add(category)
         db.session.flush()
-        from app.models import User
         user = User.query.filter_by(login="benevole-test").one()
         item = Item(name="Cône", category=category, quantity=10, unit="unité", condition="Bon état", photo_key="items/example.webp", created_by=user, updated_by=user)
         db.session.add(item)
@@ -100,23 +100,28 @@ def test_stock_adjustment_has_audit_record(logged_in_client, app):
         db.session.add(StockMovement(item=item, user=user, delta=10, quantity_after=10, note="Stock initial"))
         db.session.commit()
 
-    response = logged_in_client.post(f"/items/{item_id}/adjust-stock", data={"delta": "-2", "note": "Deux cônes abîmés"}, follow_redirects=True)
+    response = logged_in_client.post(f"/items/{item_id}/adjust-stock", data={"movement_type": "emprunt", "quantity": "2", "note": "Sortie de test"}, follow_redirects=True)
     assert response.status_code == 200
     with app.app_context():
         item = db.session.get(Item, item_id)
         assert item.quantity == 8
         movement = StockMovement.query.filter_by(item_id=item_id).order_by(StockMovement.id.desc()).first()
+        loan = Borrowing.query.filter_by(item_id=item_id).one()
         assert movement.delta == -2
         assert movement.quantity_after == 8
-        assert movement.note == "Deux cônes abîmés"
+        assert movement.note == "Emprunt · Sortie de test"
+        assert movement.item_name_snapshot == "Cône"
+        assert loan.quantity_out == 2
+        assert loan.remaining_quantity == 2
+        assert loan.user.name == "benevole-test"
 
 
-def test_borrow_and_return_movements(logged_in_client, app):
+def test_borrow_partial_and_full_return_preserve_history(logged_in_client, app):
+    from app.models import Borrowing, BorrowingEvent, User
     with app.app_context():
         category = Category(name="Signalétique")
         db.session.add(category)
         db.session.flush()
-        from app.models import User
         user = User.query.filter_by(login="benevole-test").one()
         item = Item(name="Panneau", category=category, quantity=5, unit="unité", condition="Bon état", photo_key="items/example.webp", created_by=user, updated_by=user)
         db.session.add(item)
@@ -125,29 +130,67 @@ def test_borrow_and_return_movements(logged_in_client, app):
 
     response = logged_in_client.post(
         f"/items/{item_id}/adjust-stock",
-        data={"movement_type": "emprunt", "quantity": "2", "note": "Course du club"},
+        data={"movement_type": "emprunt", "quantity": "3", "note": "Course du club"},
         follow_redirects=True,
     )
     assert response.status_code == 200
     with app.app_context():
         item = db.session.get(Item, item_id)
-        assert item.quantity == 3
-        movement = StockMovement.query.filter_by(item_id=item_id).order_by(StockMovement.id.desc()).first()
-        assert movement.delta == -2
-        assert movement.note == "Emprunt · Course du club"
+        loan = Borrowing.query.filter_by(item_id=item_id).one()
+        loan_id = loan.id
+        assert item.quantity == 2
+        assert loan.remaining_quantity == 3
+        assert loan.user.name == "benevole-test"
+        assert [(event.event_type, event.quantity) for event in loan.events] == [("sortie", 3)]
 
-    response = logged_in_client.post(
-        f"/items/{item_id}/adjust-stock",
-        data={"movement_type": "retour", "quantity": "4", "note": "Retour au local"},
-        follow_redirects=True,
-    )
+    # A partial return increases the available stock and leaves 2 units outside.
+    response = logged_in_client.post(f"/loans/{loan_id}/return", data={"quantity": "1", "note": "Retour partiel"}, follow_redirects=True)
+    assert response.status_code == 200
+    assert "reste 2 unité(s) à l’extérieur" in response.get_data(as_text=True)
+    with app.app_context():
+        item = db.session.get(Item, item_id)
+        loan = db.session.get(Borrowing, loan_id)
+        assert item.quantity == 3
+        assert loan.remaining_quantity == 2
+        assert loan.closed_at is None
+
+    response = logged_in_client.post(f"/loans/{loan_id}/return", data={"quantity": "2", "note": "Retour final"}, follow_redirects=True)
     assert response.status_code == 200
     with app.app_context():
         item = db.session.get(Item, item_id)
-        assert item.quantity == 7
-        movement = StockMovement.query.filter_by(item_id=item_id).order_by(StockMovement.id.desc()).first()
-        assert movement.delta == 4
-        assert movement.note == "Retour · Retour au local"
+        loan = db.session.get(Borrowing, loan_id)
+        assert item.quantity == 5
+        assert loan.remaining_quantity == 0
+        assert loan.closed_at is not None
+        assert [(event.event_type, event.quantity) for event in loan.events] == [("sortie", 3), ("retour", 1), ("retour", 2)]
+        assert BorrowingEvent.query.filter_by(borrowing_id=loan_id).count() == 3
+
+    history = logged_in_client.get("/loans")
+    assert history.status_code == 200
+    assert "Historique des sorties et retours" in history.get_data(as_text=True)
+    assert "benevole-test" in history.get_data(as_text=True)
+
+
+def test_cannot_return_more_than_still_out(logged_in_client, app):
+    from app.models import Borrowing, User
+    with app.app_context():
+        category = Category(name="Matériel")
+        db.session.add(category)
+        db.session.flush()
+        user = User.query.filter_by(login="benevole-test").one()
+        item = Item(name="Barrière", category=category, quantity=1, unit="unité", condition="Bon état", photo_key="items/example.webp", created_by=user, updated_by=user)
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+    logged_in_client.post(f"/items/{item_id}/adjust-stock", data={"movement_type": "emprunt", "quantity": "1"})
+    with app.app_context():
+        loan_id = Borrowing.query.filter_by(item_id=item_id).one().id
+    response = logged_in_client.post(f"/loans/{loan_id}/return", data={"quantity": "2"}, follow_redirects=True)
+    assert response.status_code == 200
+    assert "Tu ne peux pas rendre plus" in response.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(Item, item_id).quantity == 0
+        assert db.session.get(Borrowing, loan_id).remaining_quantity == 1
 
 
 def test_stock_cannot_become_negative(logged_in_client, app):
@@ -162,11 +205,100 @@ def test_stock_cannot_become_negative(logged_in_client, app):
         db.session.commit()
         item_id = item.id
 
-    response = logged_in_client.post(f"/items/{item_id}/adjust-stock", data={"delta": "-3", "note": "Erreur"}, follow_redirects=True)
+    response = logged_in_client.post(f"/items/{item_id}/adjust-stock", data={"movement_type": "emprunt", "quantity": "3", "note": "Erreur"}, follow_redirects=True)
     assert response.status_code == 200
-    assert "ne peut pas devenir négatif" in response.get_data(as_text=True)
+    assert "quantité disponible est insuffisante" in response.get_data(as_text=True)
     with app.app_context():
         assert db.session.get(Item, item_id).quantity == 1
+
+
+def test_search_is_ajax_and_filters_only_category_availability_and_quantity(logged_in_client, app):
+    with app.app_context():
+        cat = Category(name="Signalétique")
+        db.session.add(cat)
+        db.session.flush()
+        item = Item(name="Cône orange", description="Cônes pour entraînement", category=cat, quantity=4, unit="unité", location="Local à l’est", condition="Bon état", photo_key="items/example.webp")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+    response = logged_in_client.get("/?q=orange", headers={"X-Requested-With": "XMLHttpRequest"})
+    assert response.status_code == 200
+    assert "Cône orange" in response.get_data(as_text=True)
+    response = logged_in_client.get("/?q=Local%20%C3%A0%20l%E2%80%99est", headers={"X-Requested-With": "XMLHttpRequest"})
+    assert "Cône orange" not in response.get_data(as_text=True)
+    response = logged_in_client.get("/?quantity_min=5", headers={"X-Requested-With": "XMLHttpRequest"})
+    assert "Cône orange" not in response.get_data(as_text=True)
+    page = logged_in_client.get("/").get_data(as_text=True)
+    assert 'name="availability"' in page and 'name="quantity_min"' in page
+    assert 'name="condition"' not in page
+    assert 'name="location"' not in page
+
+
+def test_admin_only_item_deletion_preserves_history(logged_in_client, app):
+    from app.models import Borrowing, BorrowingEvent, User
+    with app.app_context():
+        user = User.query.filter_by(login="benevole-test").one()
+        cat = Category(name="Matériel")
+        db.session.add(cat)
+        db.session.flush()
+        item = Item(name="Ancien panneau", category=cat, quantity=0, unit="unité", condition="Bon état", photo_key="items/example.webp", created_by=user, updated_by=user)
+        db.session.add(item)
+        db.session.flush()
+        db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=user, delta=3, quantity_after=3, note="Stock initial"))
+        loan = Borrowing(item=item, item_name_snapshot=item.name, user=user, quantity_out=2, quantity_returned=2, note="Emprunt clôturé")
+        db.session.add(loan)
+        db.session.flush()
+        db.session.add(BorrowingEvent(borrowing=loan, item=item, item_name_snapshot=item.name, user=user, event_type="sortie", quantity=2, note="Sortie"))
+        db.session.add(BorrowingEvent(borrowing=loan, item=item, item_name_snapshot=item.name, user=user, event_type="retour", quantity=2, note="Retour"))
+        db.session.commit()
+        item_id = item.id
+        loan_id = loan.id
+        user.role = "member"
+        db.session.commit()
+
+    denied = logged_in_client.post(f"/items/{item_id}/delete")
+    assert denied.status_code == 403
+    with app.app_context():
+        assert db.session.get(Item, item_id) is not None
+        User.query.filter_by(login="benevole-test").one().role = "admin"
+        db.session.commit()
+
+    response = logged_in_client.get(f"/items/{item_id}")
+    assert "Supprimer l’objet" in response.get_data(as_text=True)
+    response = logged_in_client.post(f"/items/{item_id}/delete", follow_redirects=True)
+    assert response.status_code == 200
+    assert "historique des mouvements et emprunts est conservé" in response.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(Item, item_id) is None
+        movement = StockMovement.query.filter_by(item_name_snapshot="Ancien panneau").one()
+        assert movement.item_id is None
+        historical_loan = db.session.get(Borrowing, loan_id)
+        assert historical_loan.item_id is None
+        assert historical_loan.item_name_snapshot == "Ancien panneau"
+        assert BorrowingEvent.query.filter_by(borrowing_id=loan_id).count() == 2
+        assert BorrowingEvent.query.filter_by(item_name_snapshot="Ancien panneau").count() == 2
+
+
+def test_admin_cannot_delete_item_with_active_loan(logged_in_client, app):
+    from app.models import Borrowing, User
+    with app.app_context():
+        user = User.query.filter_by(login="benevole-test").one()
+        user.role = "admin"
+        cat = Category(name="Matériel")
+        db.session.add(cat)
+        db.session.flush()
+        item = Item(name="Barrière", category=cat, quantity=0, unit="unité", condition="Bon état", photo_key="items/example.webp", created_by=user, updated_by=user)
+        db.session.add(item)
+        db.session.flush()
+        loan = Borrowing(item=item, item_name_snapshot=item.name, user=user, quantity_out=1, quantity_returned=0)
+        db.session.add(loan)
+        db.session.commit()
+        item_id = item.id
+    response = logged_in_client.post(f"/items/{item_id}/delete", follow_redirects=True)
+    assert response.status_code == 200
+    assert "du matériel est encore à l’extérieur" in response.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(Item, item_id) is not None
 
 
 def test_category_tree_supports_many_levels_and_selected_parent(logged_in_client, app):

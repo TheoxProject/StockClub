@@ -7,7 +7,7 @@
   <meta name="description" content="Inventaire partagé du matériel du club sportif.">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='1.4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='1.5') }}">
   <title>{% block title %}Stock Club{% endblock %} · Stock Club</title>
 </head>
 <body>
@@ -19,6 +19,7 @@
     {% if current_user.is_authenticated %}
       <nav class="desktop-nav" aria-label="Navigation principale">
         <a href="{{ url_for('inventory.index') }}" class="{% if request.endpoint == 'inventory.index' %}active{% endif %}">Inventaire</a>
+        <a href="{{ url_for('inventory.loans') }}" class="{% if request.endpoint in ['inventory.loans', 'inventory.return_loan'] %}active{% endif %}">Matériel sorti</a>
         <a href="{{ url_for('inventory.categories') }}" class="{% if request.endpoint == 'inventory.categories' %}active{% endif %}">Catégories</a>
         <a href="{{ url_for('inventory.export_csv') }}">Exporter CSV</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin.members') }}" class="{% if request.endpoint and request.endpoint.startswith('admin.') %}active{% endif %}">Membres</a>{% endif %}
@@ -36,6 +37,7 @@
   {% if current_user.is_authenticated %}
     <nav class="mobile-nav {% if current_user.is_admin %}mobile-nav-admin{% endif %}" aria-label="Navigation mobile">
       <a href="{{ url_for('inventory.index') }}" class="{% if request.endpoint == 'inventory.index' %}active{% endif %}"><span aria-hidden="true">▦</span> Inventaire</a>
+      <a href="{{ url_for('inventory.loans') }}" class="{% if request.endpoint in ['inventory.loans', 'inventory.return_loan'] %}active{% endif %}"><span aria-hidden="true">↗</span> Matériel sorti</a>
       <a href="{{ url_for('inventory.categories') }}" class="{% if request.endpoint == 'inventory.categories' %}active{% endif %}"><span aria-hidden="true">▤</span> Catégories</a>
       <a href="{{ url_for('inventory.create_item') }}"><span aria-hidden="true">＋</span> Ajouter</a>
       {% if current_user.is_admin %}<a href="{{ url_for('admin.members') }}" class="{% if request.endpoint and request.endpoint.startswith('admin.') %}active{% endif %}"><span aria-hidden="true">♙</span> Membres</a>{% endif %}
