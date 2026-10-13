@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Organisation des catégories{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <span class="eyebrow">ORGANISATION</span>
+    <h1>Arborescence du matériel</h1>
+    <p class="muted">Crée, renomme et déplace les branches librement, sans nombre de niveaux prédéfini.</p>
+  </div>
+  <a class="button button-secondary heading-action" href="{{ url_for('inventory.index') }}">← Inventaire</a>
+</section>
+
+<section class="category-layout category-layout-flexible">
+  <article class="panel category-tree-panel">
+    <div class="panel-heading">
+      <div><h2>Structure actuelle</h2><p class="muted small">Chaque branche peut avoir zéro, une ou plusieurs sous-catégories.</p></div>
+      <span class="category-count">{{ categories|length }}</span>
+    </div>
+    {% if roots %}
+      <div class="category-tree">
+        {% macro render_category(category, depth=0) %}
+          <div class="category-tree-item" style="--indent: {{ depth * 18 }}px">
+            <span class="tree-connector" aria-hidden="true">{% if depth %}↳{% else %}▤{% endif %}</span>
+            <div class="category-tree-main">
+              <div class="category-tree-label">
+                <strong>{{ category.name }}</strong>
+                <span>{{ category.items|length }} objet{% if category.items|length != 1 %}s{% endif %} directement rangé{% if category.items|length != 1 %}s{% endif %}{% if category.children %} · {{ category.children|length }} sous-catégorie{% if category.children|length != 1 %}s{% endif %}{% endif %}</span>
+              </div>
+              <div class="category-actions">
+                <a class="button button-small button-secondary" href="{{ url_for('inventory.categories', parent_id=category.id) }}" aria-label="Ajouter une sous-catégorie à {{ category.name }}">＋ Ajouter dessous</a>
+                <a class="button button-small button-quiet" href="{{ url_for('inventory.edit_category', category_id=category.id) }}">Modifier</a>
+                <form method="post" action="{{ url_for('inventory.delete_category', category_id=category.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="button button-small button-quiet category-delete-button" type="submit">Supprimer</button>
+                </form>
+              </div>
+            </div>
+          </div>
+          {% for child in category.children %}{{ render_category(child, depth + 1) }}{% endfor %}
+        {% endmacro %}
+        {% for root in roots %}{{ render_category(root) }}{% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state compact"><h3>Aucune catégorie</h3><p>Crée une première branche. Tu pourras ensuite y ajouter autant de niveaux que nécessaire.</p></div>
+    {% endif %}
+  </article>
+
+  <article class="panel category-create-panel">
+    <div class="panel-heading"><div><h2>Créer une branche</h2><p class="muted small">Laisse la catégorie parente vide pour créer une racine, ou choisis un nœud existant pour ajouter une sous-branche.</p></div></div>
+    <form method="post" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field"><label for="name">Nom <span class="required">*</span></label><input id="name" name="name" maxlength="100" required value="{{ name_value }}" placeholder="Ex. Panneaux de distance"></div>
+      <div class="field"><label for="parent_id">Rattacher sous</label><select id="parent_id" name="parent_id"><option value="">Aucune — branche principale</option>{% for category, label in categories %}<option value="{{ category.id }}" {% if selected_parent_id == category.id %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="field-hint">Choisis une catégorie parente ou laisse « Aucune » pour créer une racine.</span></div>
+      <button class="button button-primary button-full" type="submit">＋ Créer la branche</button>
+    </form>
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Inventaire{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <span class="eyebrow">VUE D’ENSEMBLE</span>
+    <h1>Inventaire du club</h1>
+    <p class="muted">Retrouve un équipement ou mets le stock à jour.</p>
+  </div>
+  <a class="button button-primary heading-action" href="{{ url_for('inventory.create_item') }}"><span aria-hidden="true">＋</span> Ajouter un objet</a>
+</section>
+
+<section class="stats-grid" aria-label="Résumé de l’inventaire">
+  <article class="stat-card"><span class="stat-icon stat-icon-green" aria-hidden="true">▦</span><div><span class="stat-label">Références</span><strong>{{ total_references }}</strong><small>types de matériel</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">□</span><div><span class="stat-label">Quantité totale</span><strong>{{ total_units }}</strong><small>unités en stock</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-rose" aria-hidden="true">!</span><div><span class="stat-label">À surveiller</span><strong>{{ attention_count }}</strong><small>références à contrôler ou réparer</small></div></article>
+</section>
+
+<section class="inventory-section">
+  <div class="section-title-row"><div><h2>Le matériel</h2><span class="muted small">{{ items|length }} résultat{% if items|length > 1 %}s{% endif %}</span></div><a class="text-link desktop-export" href="{{ url_for('inventory.export_csv') }}">Exporter la liste ↗</a></div>
+  <form class="filter-panel" method="get" action="{{ url_for('inventory.index') }}">
+    <div class="search-input"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search }}" placeholder="Rechercher un objet, une catégorie…" aria-label="Rechercher"></div>
+    <select name="category" aria-label="Filtrer par catégorie">
+      <option value="">Toutes les catégories</option>
+      {% for category, label in categories %}<option value="{{ category.id }}" {% if selected_category and selected_category.id == category.id %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <select name="condition" aria-label="Filtrer par état">
+      <option value="">Tous les états</option>
+      {% for value in conditions %}<option value="{{ value }}" {% if condition == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
+    <button class="button button-secondary" type="submit">Filtrer</button>
+    {% if search or selected_category or condition %}<a class="button button-quiet" href="{{ url_for('inventory.index') }}">Réinitialiser</a>{% endif %}
+  </form>
+
+  {% if items %}
+    <div class="item-grid">
+      {% for item in items %}
+        <a class="item-card" href="{{ url_for('inventory.item_detail', item_id=item.id) }}">
+          <div class="item-photo-wrap">
+            {% if item.photo_key %}<img class="item-photo" src="{{ photo_url(item.photo_key) }}" alt="Photo de {{ item.name }}" loading="lazy">{% else %}<div class="photo-placeholder" aria-hidden="true">▧</div>{% endif %}
+            <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
+          </div>
+          <div class="item-card-body">
+            <span class="category-path">{{ item.category.full_path }}</span>
+            <h3>{{ item.name }}</h3>
+            <p class="item-description">{{ item.description or 'Aucune description renseignée.' }}</p>
+            <div class="item-card-bottom"><span class="stock-amount"><strong>{{ item.quantity }}</strong> unité{% if item.quantity > 1 %}s{% endif %}</span><span class="item-arrow" aria-hidden="true">↗</span></div>
+            {% if item.location %}<span class="item-location">⌖ {{ item.location }}</span>{% endif %}
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state"><span class="empty-icon" aria-hidden="true">▦</span><h3>{% if search or selected_category or condition %}Aucun résultat{% else %}L’inventaire est encore vide{% endif %}</h3><p>{% if search or selected_category or condition %}Essaie de modifier tes filtres.{% else %}Ajoute le premier objet pour commencer à recenser le matériel du club.{% endif %}</p>{% if not (search or selected_category or condition) %}<a class="button button-primary" href="{{ url_for('inventory.create_item') }}">Ajouter le premier objet</a>{% endif %}</div>
+  {% endif %}
+</section>
+{% endblock %}

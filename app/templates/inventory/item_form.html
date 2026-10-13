@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Modifier ' ~ item.name if item else 'Ajouter un objet' }}{% endblock %}
+{% block content %}
+<div class="form-page">
+  <a class="back-link" href="{{ url_for('inventory.item_detail', item_id=item.id) if item else url_for('inventory.index') }}">← {% if item %}Retour à la fiche{% else %}Retour à l’inventaire{% endif %}</a>
+  <section class="form-intro"><span class="eyebrow">{{ 'MISE À JOUR' if item else 'NOUVELLE RÉFÉRENCE' }}</span><h1>{{ 'Modifier le matériel' if item else 'Ajouter un objet' }}</h1><p class="muted">{{ 'Modifie les informations de cette référence.' if item else 'Décris le matériel et ajoute une photo pour le retrouver facilement.' }}</p></section>
+  <form id="item-form" method="post" enctype="multipart/form-data" class="form-card stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-section-heading"><span class="step-number">1</span><div><h2>Identification</h2><p>Nom, catégorie et photo du matériel.</p></div></div>
+    <div class="form-grid">
+      <div class="field full-width"><label for="name">Nom de l’objet <span class="required">*</span></label><input id="name" name="name" required maxlength="160" placeholder="Ex. Panneau arrivée 1 km" value="{{ form.get('name', item.name if item else '') }}"></div>
+      <div class="field"><label for="category_id">Catégorie <span class="required">*</span></label><select id="category_id" name="category_id" required><option value="">Choisir une catégorie</option>{% for category, label in categories %}<option value="{{ category.id }}" {% if form.get('category_id', item.category_id if item else '')|string == category.id|string %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="field-hint">Tu ne trouves pas la bonne catégorie ? <a href="{{ url_for('inventory.categories') }}">Créer une catégorie</a>.</span></div>
+      <div class="field"><label for="location">Emplacement</label><input id="location" name="location" maxlength="160" placeholder="Ex. Local principal, étagère 2" value="{{ form.get('location', item.location if item else '') }}"></div>
+      <div class="field full-width"><label for="description">Description</label><textarea id="description" name="description" rows="3" maxlength="5000" placeholder="Utilisation, dimensions, particularités…">{{ form.get('description', item.description if item else '') }}</textarea></div>
+      <div class="field full-width photo-field"><label>Photo {% if not item %}<span class="required">*</span>{% else %}<span class="optional">(facultatif si inchangée)</span>{% endif %}</label>
+        {% if item and item.photo_key %}<div class="current-photo"><img src="{{ photo_url(item.photo_key) }}" alt="Photo actuelle de {{ item.name }}"><span>Photo actuelle</span></div>{% endif %}
+        <div class="photo-picker-row">
+          <label for="photo" class="camera-picker-label">📷 Prendre ou choisir une photo</label>
+          <input id="photo" class="photo-native-input" name="photo" type="file" accept="image/*" capture="environment" {% if not item %}required{% endif %} aria-describedby="photo-status">
+        </div>
+        <p id="photo-status" class="field-hint" role="status" aria-live="polite">Aucune nouvelle photo sélectionnée.</p>
+        <div id="photo-preview" class="current-photo photo-preview" hidden><img id="photo-preview-image" alt="Aperçu de la photo sélectionnée"><span id="photo-preview-name">Nouvelle photo</span></div>
+        <p id="form-feedback" class="form-feedback" role="alert" hidden></p>
+        <span class="field-hint">Appuie sur l’icône appareil photo pour prendre une photo ou choisir une image. JPG, PNG ou WebP, 8 Mo maximum.</span>
+      </div>
+    </div>
+    <div class="form-section-heading form-section-spaced"><span class="step-number">2</span><div><h2>Stock et état</h2><p>Quantité de départ et état général de cette référence.</p></div></div>
+    <div class="form-grid">
+      {% if not item %}<div class="field"><label for="quantity">Quantité initiale <span class="required">*</span></label><input id="quantity" name="quantity" type="number" inputmode="numeric" min="0" max="1000000" step="1" required value="{{ form.get('quantity', '1') }}"></div>{% else %}<div class="field"><label>Quantité actuelle</label><div class="readonly-stock">{{ item.quantity }} unité{% if item.quantity > 1 %}s{% endif %}</div><span class="field-hint">Pour gérer les emprunts et retours, utilise la section Stock de la fiche matériel.</span></div>{% endif %}
+      <div class="field"><label for="condition">État général</label><select id="condition" name="condition">{% for value in conditions %}<option value="{{ value }}" {% if form.get('condition', item.condition if item else 'Bon état') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-actions"><a class="button button-quiet" href="{{ url_for('inventory.item_detail', item_id=item.id) if item else url_for('inventory.index') }}">Annuler</a><button class="button button-primary button-large" type="submit">{{ 'Enregistrer les modifications' if item else 'Ajouter à l’inventaire' }}</button></div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const form = document.getElementById('item-form');
+  const input = document.getElementById('photo');
+  const preview = document.getElementById('photo-preview');
+  const image = document.getElementById('photo-preview-image');
+  const name = document.getElementById('photo-preview-name');
+  const status = document.getElementById('photo-status');
+  const feedback = document.getElementById('form-feedback');
+  let previousUrl;
+  if (!form || !input) return;
+  function message(text) { feedback.textContent = text; feedback.hidden = !text; }
+  input.addEventListener('change', () => {
+    message('');
+    const file = input.files && input.files[0];
+    if (previousUrl) { URL.revokeObjectURL(previousUrl); previousUrl = undefined; }
+    image.removeAttribute('src');
+    preview.hidden = true;
+    if (!file) { status.textContent = 'Aucune nouvelle photo sélectionnée.'; return; }
+    status.textContent = `Photo sélectionnée : ${file.name}`;
+    if (file.size > 7 * 1024 * 1024) {
+      message('La photo est trop volumineuse (7 Mo maximum recommandé). Choisis une image plus petite.');
+      return;
+    }
+    // createObjectURL works for JPEG/PNG/WebP and supported HEIC previews on mobile.
+    try {
+      previousUrl = URL.createObjectURL(file);
+      image.onload = () => { preview.hidden = false; };
+      image.onerror = () => { preview.hidden = true; status.textContent += ' — aperçu indisponible sur ce navigateur.'; };
+      image.src = previousUrl;
+      name.textContent = file.name;
+    } catch (error) {
+      status.textContent += ' — aperçu indisponible sur ce navigateur.';
+    }
+  });
+  form.addEventListener('invalid', (event) => {
+    const field = event.target;
+    const label = field.labels && field.labels[0] ? field.labels[0].textContent.trim() : field.name;
+    message(`Champ obligatoire ou invalide : ${label}.`);
+  }, true);
+  form.addEventListener('submit', (event) => {
+    const file = input.files && input.files[0];
+    if (file && file.size > 7 * 1024 * 1024) {
+      event.preventDefault();
+      message('La photo dépasse la taille recommandée de 7 Mo.');
+      feedback.scrollIntoView({block:'center', behavior:'smooth'});
+      return;
+    }
+    // The form is submitted natively so file uploads keep working without JS.
+    message('Enregistrement en cours…');
+  });
+})();
+</script>
+{% endblock %}

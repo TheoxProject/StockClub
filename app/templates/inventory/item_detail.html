@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ item.name }}{% endblock %}
+{% block content %}
+<div class="detail-page">
+  <a class="back-link" href="{{ url_for('inventory.index') }}">← Retour à l’inventaire</a>
+  <section class="detail-hero">
+    <div class="detail-image">{% if item.photo_key %}<img src="{{ photo_url(item.photo_key) }}" alt="Photo de {{ item.name }}">{% else %}<div class="photo-placeholder">▧</div>{% endif %}</div>
+    <div class="detail-heading">
+      <span class="category-path">{{ item.category.full_path }}</span>
+      <h1>{{ item.name }}</h1>
+      <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
+      {% if item.description %}<p class="detail-description">{{ item.description }}</p>{% else %}<p class="muted">Aucune description renseignée.</p>{% endif %}
+      <div class="detail-actions"><a class="button button-secondary" href="{{ url_for('inventory.edit_item', item_id=item.id) }}">✎ Modifier la fiche</a><a class="button button-quiet" href="{{ url_for('inventory.categories') }}">Gérer les catégories</a></div>
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel stock-panel">
+      <div class="panel-heading"><div><span class="eyebrow">STOCK DISPONIBLE</span><h2>Quantité</h2></div><span class="stat-icon stat-icon-green" aria-hidden="true">□</span></div>
+      <div class="large-quantity">{{ item.quantity }} <span>unité{% if item.quantity > 1 %}s{% endif %}</span></div>
+      {% if item.location %}<p class="location-line">⌖ <strong>Emplacement :</strong> {{ item.location }}</p>{% else %}<p class="muted">Aucun emplacement renseigné.</p>{% endif %}
+      <form class="stock-adjust-form" action="{{ url_for('inventory.adjust_stock', item_id=item.id) }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <fieldset class="movement-type-fieldset">
+          <legend>Type de mouvement</legend>
+          <div class="movement-type-options">
+            <label class="movement-choice"><input type="radio" name="movement_type" value="emprunt" checked><span><strong>↗ Emprunt</strong><small>Le matériel sort du stock</small></span></label>
+            <label class="movement-choice"><input type="radio" name="movement_type" value="retour"><span><strong>↙ Retour</strong><small>Le matériel revient au stock</small></span></label>
+          </div>
+        </fieldset>
+        <label for="quantity">Quantité empruntée / rendue</label>
+        <div class="quantity-controls"><button type="button" class="quantity-step" data-step="-1" aria-label="Diminuer la quantité">−</button><input id="quantity" name="quantity" type="number" inputmode="numeric" min="1" max="100000" step="1" value="1" required><button type="button" class="quantity-step" data-step="1" aria-label="Augmenter la quantité">＋</button></div>
+        <label for="note">Commentaire (facultatif)</label><input id="note" name="note" type="text" maxlength="240" placeholder="Ex. Course du dimanche, nom de l’emprunteur…">
+        <button type="submit" class="button button-primary button-full">Enregistrer l’emprunt / retour</button>
+        <p class="field-hint">Un emprunt diminue le stock disponible ; un retour l’augmente. Le mouvement sera ajouté à l’historique.</p>
+      </form>
+    </article>
+    <article class="panel history-panel">
+      <div class="panel-heading"><div><span class="eyebrow">TRAÇABILITÉ</span><h2>Historique du stock</h2></div></div>
+      {% if item.movements %}<div class="movement-list">{% for movement in item.movements[:12] %}<div class="movement-row"><span class="movement-sign {% if movement.delta > 0 %}positive{% else %}negative{% endif %}">{% if movement.delta > 0 %}+{% endif %}{{ movement.delta }}</span><div class="movement-content"><strong>{{ movement.note or 'Aucun commentaire' }}</strong><span>{{ movement.user.name if movement.user else 'Compte supprimé' }} · {{ movement.created_at|localdatetime if movement.created_at else '' }}</span></div><span class="movement-after">{{ movement.quantity_after }}</span></div>{% endfor %}</div>{% else %}<p class="muted">Aucun mouvement enregistré.</p>{% endif %}
+    </article>
+  </section>
+  <p class="updated-note">Fiche mise à jour le {{ item.updated_at|localdatetime if item.updated_at else '—' }}{% if item.updated_by %} par {{ item.updated_by.name }}{% endif %}.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.querySelectorAll('.quantity-step').forEach((button) => {
+    button.addEventListener('click', () => {
+      const input = document.getElementById('quantity');
+      const next = Number.parseInt(input.value || '1', 10) + Number(button.dataset.step);
+      input.value = Math.max(1, next).toString();
+      input.focus({ preventScroll: true });
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Connexion{% endblock %}
+{% block content %}
+<section class="login-layout">
+  <div class="login-pitch">
+    <span class="eyebrow">LE MATÉRIEL DU CLUB, AU MÊME ENDROIT</span>
+    <h1>Tout le stock.<br><span>En un coup d’œil.</span></h1>
+    <p>Retrouve le matériel, consulte les quantités et mets l’inventaire à jour depuis ton téléphone.</p>
+    <div class="login-points"><span>✓ Photos du matériel</span><span>✓ Quantités partagées</span><span>✓ Historique des mouvements</span></div>
+  </div>
+  <div class="login-card">
+    <div class="login-card-icon" aria-hidden="true">↗</div>
+    <h2>Connexion</h2>
+    <p class="muted">Saisis ton nom de login et ton code secret.</p>
+    <form method="post" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="login">Nom de login</label>
+      <input id="login" name="login" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus maxlength="80" placeholder="Ex. theo" value="{{ request.form.get('login', '') }}">
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" minlength="6" autocomplete="current-password" required placeholder="6 caractères minimum">
+      <label class="checkbox-line"><input type="checkbox" name="remember"> Rester connecté sur cet appareil</label>
+      <button class="button button-primary button-large button-full" type="submit">Se connecter <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="fine-print">Les comptes sont créés par le responsable de l’inventaire. L’inscription publique est désactivée.</p>
+  </div>
+</section>
+{% endblock %}

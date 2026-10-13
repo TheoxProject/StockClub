@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Modifier {{ category.name }}{% endblock %}
+{% block content %}
+<section class="form-page category-edit-page">
+  <a class="back-link" href="{{ url_for('inventory.categories') }}">← Retour à l’arborescence</a>
+  <div class="form-intro"><span class="eyebrow">ORGANISATION DU MATÉRIEL</span><h1>Modifier une branche</h1><p class="muted">Renomme cette catégorie ou déplace toute sa branche dans une autre partie de l’arborescence.</p></div>
+  <div class="form-card">
+    <div class="category-current-path"><span class="field-hint">Chemin actuel</span><strong>{{ category.full_path }}</strong><span class="field-hint">{{ category.items|length }} objet(s) directement rangé(s) · {{ category.children|length }} sous-catégorie(s) directe(s)</span></div>
+    <form method="post" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field"><label for="name">Nom de la catégorie <span class="required">*</span></label><input id="name" name="name" maxlength="100" required value="{{ form_name }}"></div>
+      <div class="field"><label for="parent_id">Catégorie parente</label><select id="parent_id" name="parent_id"><option value="">Aucune — branche principale</option>{% for candidate, label in categories %}<option value="{{ candidate.id }}" {% if selected_parent_id == candidate.id %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="field-hint">Cette liste exclut cette branche et toutes ses sous-catégories pour éviter une boucle dans l’arborescence.</span></div>
+      <div class="form-actions"><a class="button button-quiet" href="{{ url_for('inventory.categories') }}">Annuler</a><button class="button button-primary button-large" type="submit">Enregistrer les modifications</button></div>
+    </form>
+  </div>
+</section>
+{% endblock %}

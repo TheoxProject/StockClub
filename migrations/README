@@ -1,0 +1,9 @@
+Flask-Migrate / Alembic migrations.
+
+Apply migrations:
+    flask --app run.py db upgrade
+
+After changing SQLAlchemy models:
+    flask --app run.py db migrate -m "describe the schema change"
+    # review the generated revision before applying it
+    flask --app run.py db upgrade

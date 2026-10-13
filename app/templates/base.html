@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16372f">
+  <meta name="description" content="Inventaire partagé du matériel du club sportif.">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='1.2') }}">
+  <title>{% block title %}Stock Club{% endblock %} · Stock Club</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('inventory.index') if current_user.is_authenticated else url_for('auth.login') }}">
+      <span class="brand-mark" aria-hidden="true">SC</span>
+      <span><strong>Stock Club</strong><small>Inventaire du matériel</small></span>
+    </a>
+    {% if current_user.is_authenticated %}
+      <nav class="desktop-nav" aria-label="Navigation principale">
+        <a href="{{ url_for('inventory.index') }}" class="{% if request.endpoint == 'inventory.index' %}active{% endif %}">Inventaire</a>
+        <a href="{{ url_for('inventory.categories') }}" class="{% if request.endpoint == 'inventory.categories' %}active{% endif %}">Catégories</a>
+        <a href="{{ url_for('inventory.export_csv') }}">Exporter CSV</a>
+      </nav>
+      <div class="user-menu">
+        <span class="user-name">{{ current_user.name }}</span>
+        <form method="post" action="{{ url_for('auth.logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button button-quiet button-small" type="submit">Déconnexion</button>
+        </form>
+      </div>
+    {% endif %}
+  </header>
+
+  {% if current_user.is_authenticated %}
+    <nav class="mobile-nav" aria-label="Navigation mobile">
+      <a href="{{ url_for('inventory.index') }}" class="{% if request.endpoint == 'inventory.index' %}active{% endif %}"><span aria-hidden="true">▦</span> Inventaire</a>
+      <a href="{{ url_for('inventory.categories') }}" class="{% if request.endpoint == 'inventory.categories' %}active{% endif %}"><span aria-hidden="true">▤</span> Catégories</a>
+      <a href="{{ url_for('inventory.create_item') }}"><span aria-hidden="true">＋</span> Ajouter</a>
+    </nav>
+  {% endif %}
+
+  <main class="page-shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer"><span>Stock Club</span><span>Inventaire partagé du club</span></footer>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('{{ url_for('service_worker') }}').catch(() => {}));
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
