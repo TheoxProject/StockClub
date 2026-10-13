@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 import boto3
+from botocore.config import Config
 from PIL import Image, ImageOps, UnidentifiedImageError
 from flask import current_app, url_for
 from werkzeug.datastructures import FileStorage
@@ -24,12 +25,17 @@ def _s3_enabled() -> bool:
 
 
 def _s3_client():
+    region = current_app.config.get("S3_REGION")
+    if not region or region == "auto":
+        region = "eu-central-1"
+
     return boto3.client(
         "s3",
         endpoint_url=current_app.config["S3_ENDPOINT_URL"],
         aws_access_key_id=current_app.config["S3_ACCESS_KEY_ID"],
         aws_secret_access_key=current_app.config["S3_SECRET_ACCESS_KEY"],
-        region_name=current_app.config.get("S3_REGION") or "auto",
+        region_name=region,
+        config=Config(s3={"addressing_style": "path"}),
     )
 
 
