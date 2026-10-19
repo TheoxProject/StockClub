@@ -121,3 +121,11 @@ Une fois GitHub connecté à Render, un `git push` sur la branche déployée dé
 - Render services gratuits : https://render.com/docs/free
 - Neon : https://neon.com/docs/get-started/connect-neon
 - Neon Object Storage : https://neon.com/docs/object-storage/overview
+
+## Mise à jour Stock Club 1.4
+
+Avant de déployer la version 1.4, crée si possible une sauvegarde Neon. Le `startCommand` du fichier `render.yaml` lance `python -m flask --app run.py db upgrade` avant Gunicorn : les migrations de rôles (si pas encore appliquées) et la migration `0004_live_search_loans` seront appliquées au démarrage. Vérifie le premier déploiement dans les logs Render. Ne lance pas une seconde instance sur la même base pendant la migration.
+
+La migration reprend au mieux l'historique de sortie/retour de l'ancienne version à partir des mouvements libellés « Emprunt » et « Retour ». L'ancien modèle ne liait pas chaque retour à une sortie précise : les sorties précédentes sont donc agrégées par objet et le responsable des quantités encore dehors est explicitement indiqué comme non reconstituable. Les emprunts enregistrés à partir de la 1.4 disposent d'un responsable précis et acceptent les retours partiels associés à la sortie d'origine. Vérifie la page « Matériel sorti » après le déploiement et ajuste manuellement tout reliquat ancien si nécessaire.
+
+La suppression d'un objet est accessible uniquement aux administrateurs. Elle est refusée tant qu'un emprunt n'est pas entièrement rendu. La fiche et sa photo sont supprimées, mais les lignes de l'historique sont conservées avec un instantané du nom de l'objet.

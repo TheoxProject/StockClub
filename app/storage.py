@@ -52,12 +52,18 @@ def _normalise_image(file: FileStorage) -> bytes:
 
         file.stream.seek(0)
         with Image.open(file.stream) as image:
+            # A phone JPEG may have 50+ megapixels. JPEG draft decoding reduces
+            # the working image *before* applying EXIF rotation and resizing.
+            if image.format == "JPEG":
+                image.draft("RGB", (1600, 1600))
+            elif image.width * image.height > 25_000_000:
+                raise InvalidImage("Image trop grande. Choisis une photo de 25 Mpx maximum ou utilise le mode photo standard.")
             image = ImageOps.exif_transpose(image)
-            image.thumbnail((2000, 2000))
+            image.thumbnail((1600, 1600))
             if image.mode not in {"RGB", "RGBA"}:
                 image = image.convert("RGBA" if "transparency" in image.info else "RGB")
             output = io.BytesIO()
-            image.save(output, format="WEBP", quality=86, method=6)
+            image.save(output, format="WEBP", quality=82, method=4)
             return output.getvalue()
     except InvalidImage:
         raise

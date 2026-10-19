@@ -16,12 +16,12 @@
         {% if item and item.photo_key %}<div class="current-photo"><img src="{{ photo_url(item.photo_key) }}" alt="Photo actuelle de {{ item.name }}"><span>Photo actuelle</span></div>{% endif %}
         <div class="photo-picker-row">
           <label for="photo" class="camera-picker-label">📷 Prendre ou choisir une photo</label>
-          <input id="photo" class="photo-native-input" name="photo" type="file" accept="image/*" capture="environment" {% if not item %}required{% endif %} aria-describedby="photo-status">
+          <input id="photo" class="photo-native-input" name="photo" type="file" accept="image/*" {% if not item %}required{% endif %} aria-describedby="photo-status photo-help">
         </div>
         <p id="photo-status" class="field-hint" role="status" aria-live="polite">Aucune nouvelle photo sélectionnée.</p>
         <div id="photo-preview" class="current-photo photo-preview" hidden><img id="photo-preview-image" alt="Aperçu de la photo sélectionnée"><span id="photo-preview-name">Nouvelle photo</span></div>
         <p id="form-feedback" class="form-feedback" role="alert" hidden></p>
-        <span class="field-hint">Appuie sur l’icône appareil photo pour prendre une photo ou choisir une image. JPG, PNG ou WebP, 8 Mo maximum.</span>
+        <span class="field-hint" id="photo-help">Après la prise de vue, reviens à ce formulaire et vérifie le message « Photo prête à envoyer ». Sur téléphone, l’aperçu est désactivé pour économiser la mémoire. JPG, PNG ou WebP, 7 Mo maximum.</span>
       </div>
     </div>
     <div class="form-section-heading form-section-spaced"><span class="step-number">2</span><div><h2>Stock et état</h2><p>Quantité de départ et état général de cette référence.</p></div></div>
@@ -43,31 +43,76 @@
   const name = document.getElementById('photo-preview-name');
   const status = document.getElementById('photo-status');
   const feedback = document.getElementById('form-feedback');
-  let previousUrl;
+  const submit = form && form.querySelector('button[type="submit"]');
   if (!form || !input) return;
-  function message(text) { feedback.textContent = text; feedback.hidden = !text; }
-  input.addEventListener('change', () => {
-    message('');
-    const file = input.files && input.files[0];
-    if (previousUrl) { URL.revokeObjectURL(previousUrl); previousUrl = undefined; }
-    image.removeAttribute('src');
+
+  const MAX_FILE_SIZE = 7 * 1024 * 1024; // Le formulaire entier doit rester sous 8 Mo.
+  let previewUrl = null;
+  let previewRequest = 0;
+  let sending = false;
+  // Never decode a full-size camera capture automatically on a mobile device.
+  const mobile = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+  function message(value) {
+    feedback.textContent = value;
+    feedback.hidden = !value;
+  }
+
+  function clearPreview() {
+    previewRequest += 1;
     preview.hidden = true;
-    if (!file) { status.textContent = 'Aucune nouvelle photo sélectionnée.'; return; }
-    status.textContent = `Photo sélectionnée : ${file.name}`;
-    if (file.size > 7 * 1024 * 1024) {
-      message('La photo est trop volumineuse (7 Mo maximum recommandé). Choisis une image plus petite.');
+    image.removeAttribute('src');
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+    }
+  }
+
+  function updatePhoto() {
+    if (sending) return;
+    message('');
+    clearPreview();
+    const file = input.files && input.files[0];
+    if (!file) {
+      status.textContent = 'Aucune nouvelle photo sélectionnée.';
       return;
     }
-    // createObjectURL works for JPEG/PNG/WebP and supported HEIC previews on mobile.
-    try {
-      previousUrl = URL.createObjectURL(file);
-      image.onload = () => { preview.hidden = false; };
-      image.onerror = () => { preview.hidden = true; status.textContent += ' — aperçu indisponible sur ce navigateur.'; };
-      image.src = previousUrl;
-      name.textContent = file.name;
-    } catch (error) {
-      status.textContent += ' — aperçu indisponible sur ce navigateur.';
+    if (file.size > MAX_FILE_SIZE) {
+      status.textContent = 'Photo trop volumineuse.';
+      message('La photo dépasse 7 Mo. Choisis une image plus petite ou baisse la résolution de l’appareil photo.');
+      return;
     }
+    if (!file.size) {
+      status.textContent = 'La photo semble vide.';
+      message('La prise de vue a échoué. Réessaie ou sélectionne une photo depuis la galerie.');
+      return;
+    }
+    status.textContent = `✓ Photo prête à envoyer : ${file.name} (${(file.size / 1048576).toFixed(1)} Mo).`;
+
+    // Desktop only, and only for small images: the original URL <img> would
+    // otherwise decode a 12–50 MP camera photo into a large memory buffer.
+    if (mobile || file.size > 2 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/i.test(file.type)) {
+      return;
+    }
+    const requestId = previewRequest;
+    try {
+      previewUrl = URL.createObjectURL(file);
+      image.onload = () => {
+        if (requestId === previewRequest) preview.hidden = false;
+      };
+      image.onerror = () => { preview.hidden = true; };
+      image.src = previewUrl;
+      name.textContent = file.name;
+    } catch (_) {
+      // The selected file is still submitted normally, even without preview.
+    }
+  }
+
+  input.addEventListener('change', updatePhoto);
+  // Some mobile camera applications return via a page resume without firing
+  // a normal change event immediately; refresh the status, not the image.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !sending && input.files && input.files.length) updatePhoto();
   });
   form.addEventListener('invalid', (event) => {
     const field = event.target;
@@ -76,13 +121,19 @@
   }, true);
   form.addEventListener('submit', (event) => {
     const file = input.files && input.files[0];
-    if (file && file.size > 7 * 1024 * 1024) {
+    if (sending) { event.preventDefault(); return; }
+    if (file && (!file.size || file.size > MAX_FILE_SIZE)) {
       event.preventDefault();
-      message('La photo dépasse la taille recommandée de 7 Mo.');
-      feedback.scrollIntoView({block:'center', behavior:'smooth'});
+      message('Photo invalide ou supérieure à 7 Mo. Choisis une autre photo.');
+      feedback.scrollIntoView({block: 'center'});
       return;
     }
-    // The form is submitted natively so file uploads keep working without JS.
+    sending = true;
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = 'Enregistrement en cours…';
+    }
+    // Native multipart submit: no canvas, FileReader, base64 or giant JS copy.
     message('Enregistrement en cours…');
   });
 })();
