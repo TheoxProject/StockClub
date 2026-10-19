@@ -420,3 +420,52 @@ def test_password_may_contain_letters(client, app):
         db.session.commit()
     response = client.post("/auth/login", data={"login":"benevole-test", "password":"TestABC123!"})
     assert response.status_code == 302
+
+
+def test_create_item_accepts_stable_camera_and_gallery_photo_fields(logged_in_client, app):
+    response = logged_in_client.post(
+        "/categories",
+        data={"name": "Matériel photo", "parent_id": ""},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    with app.app_context():
+        category_id = Category.query.filter_by(name="Matériel photo").one().id
+
+    camera_response = logged_in_client.post(
+        "/items/new",
+        data={
+            "name": "Objet caméra",
+            "description": "Capture depuis le champ caméra.",
+            "category_id": str(category_id),
+            "quantity": "1",
+            "location": "Local",
+            "condition": "Bon état",
+            "photo_camera": (make_image(), "camera.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert camera_response.status_code == 200
+
+    gallery_response = logged_in_client.post(
+        "/items/new",
+        data={
+            "name": "Objet galerie",
+            "description": "Capture depuis le champ galerie.",
+            "category_id": str(category_id),
+            "quantity": "1",
+            "location": "Local",
+            "condition": "Bon état",
+            "photo_gallery": (make_image(), "galerie.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert gallery_response.status_code == 200
+
+    with app.app_context():
+        camera_item = Item.query.filter_by(name="Objet caméra").one()
+        gallery_item = Item.query.filter_by(name="Objet galerie").one()
+        assert camera_item.photo_key and camera_item.photo_key.endswith(".webp")
+        assert gallery_item.photo_key and gallery_item.photo_key.endswith(".webp")

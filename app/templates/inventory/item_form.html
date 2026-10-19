@@ -16,9 +16,9 @@
         {% if item and item.photo_key %}<div class="current-photo"><img src="{{ photo_url(item.photo_key) }}" alt="Photo actuelle de {{ item.name }}"><span>Photo actuelle</span></div>{% endif %}
         <div class="photo-picker-row">
           <label for="photo-camera" class="camera-picker-label">📷 Prendre une photo</label>
-          <input id="photo-camera" class="photo-native-input" type="file" accept="image/*" capture="environment" aria-describedby="photo-status photo-help">
+          <input id="photo-camera" class="photo-native-input" name="photo_camera" type="file" accept="image/*" capture="environment" aria-describedby="photo-status photo-help">
           <label for="photo" class="camera-picker-label">🖼️ Choisir depuis la galerie</label>
-          <input id="photo" class="photo-native-input" name="photo" type="file" accept="image/*" {% if not item %}required{% endif %} aria-describedby="photo-status photo-help">
+          <input id="photo" class="photo-native-input" name="photo_gallery" type="file" accept="image/*" aria-describedby="photo-status photo-help">
         </div>
         <p id="photo-status" class="field-hint" role="status" aria-live="polite">Aucune nouvelle photo sélectionnée.</p>
         <div id="photo-preview" class="current-photo photo-preview" hidden><img id="photo-preview-image" alt="Aperçu de la photo sélectionnée"><span id="photo-preview-name">Nouvelle photo</span></div>
@@ -50,8 +50,8 @@
   const feedback = document.getElementById('form-feedback');
   const submit = form && form.querySelector('button[type="submit"]');
   if (!form || !input || !cameraInput) return;
-  // Only the last selected source submits the multipart 'photo' field.
-  input.required = false;
+  // Each source has a stable multipart field name. Do not rely on the mobile
+  // camera firing `change` in order to rename the input before submitting.
 
   const MAX_FILE_SIZE = 7 * 1024 * 1024; // Le formulaire entier doit rester sous 8 Mo.
   let previewUrl = null;
@@ -75,11 +75,28 @@
     }
   }
 
+  function getSelectedInput() {
+    // Normally selectSource() records the last chosen input. On some mobile
+    // browsers, returning from the camera may not dispatch `change`, so fall
+    // back to whichever input actually contains a file.
+    if (selectedInput && selectedInput.files && selectedInput.files.length) return selectedInput;
+    if (cameraInput.files && cameraInput.files.length) {
+      selectedInput = cameraInput;
+      return cameraInput;
+    }
+    if (input.files && input.files.length) {
+      selectedInput = input;
+      return input;
+    }
+    return selectedInput || input;
+  }
+
   function updatePhoto() {
     if (sending) return;
     message('');
     clearPreview();
-    const file = selectedInput.files && selectedInput.files[0];
+    const activeInput = getSelectedInput();
+    const file = activeInput.files && activeInput.files[0];
     if (!file) {
       status.textContent = 'Aucune nouvelle photo sélectionnée.';
       return;
@@ -118,9 +135,8 @@
   function selectSource(source, other) {
     if (sending) return;
     if (source.files && source.files.length) {
+      // Submit exactly one photo when the user switches between camera/gallery.
       other.value = '';
-      other.removeAttribute('name');
-      source.setAttribute('name', 'photo');
       selectedInput = source;
     }
     updatePhoto();
@@ -128,18 +144,26 @@
 
   input.addEventListener('change', () => selectSource(input, cameraInput));
   cameraInput.addEventListener('change', () => selectSource(cameraInput, input));
-  // Some mobile camera applications return via a page resume without firing
-  // a normal change event immediately; refresh the status, not the image.
+  // Camera apps may resume the browser without a normal `change` event. Check
+  // both stable file inputs on visibility/focus/page restoration.
+  function refreshPhotoAfterResume() {
+    if (sending) return;
+    const activeInput = getSelectedInput();
+    if (activeInput.files && activeInput.files.length) updatePhoto();
+  }
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !sending && selectedInput.files && selectedInput.files.length) updatePhoto();
+    if (!document.hidden) refreshPhotoAfterResume();
   });
+  window.addEventListener('focus', refreshPhotoAfterResume);
+  window.addEventListener('pageshow', refreshPhotoAfterResume);
   form.addEventListener('invalid', (event) => {
     const field = event.target;
     const label = field.labels && field.labels[0] ? field.labels[0].textContent.trim() : field.name;
     message(`Champ obligatoire ou invalide : ${label}.`);
   }, true);
   form.addEventListener('submit', (event) => {
-    const file = selectedInput.files && selectedInput.files[0];
+    const activeInput = getSelectedInput();
+    const file = activeInput.files && activeInput.files[0];
     if (sending) { event.preventDefault(); return; }
     if (photoRequired && !file) {
       event.preventDefault();

@@ -18,3 +18,12 @@ Avant le déploiement, sauvegarder si possible la base Neon. Après passage de R
 - Après création : le nouveau compte a le rôle Administrateur et la page n'est plus accessible.
 - Un administrateur ne peut pas rétrograder le dernier administrateur actif.
 - Les invitations à usage unique, la photo mobile, la recherche, les emprunts/retours et la suppression administrateur fonctionnent toujours.
+
+
+### Correctif photo mobile (V2.1)
+- La caméra et la galerie utilisent désormais chacune un nom de champ multipart stable.
+- Le serveur accepte les deux champs, ainsi que l'ancien nom `photo` pour compatibilité.
+- Au retour de la caméra, le formulaire vérifie les fichiers présents lors des événements `visibilitychange`, `focus` et `pageshow`.
+- Aucun aperçu haute résolution n'est généré sur mobile ; la limite de 7 Mo est conservée.
+
+Version livrable : V2.1 (correctif photo mobile inclus).

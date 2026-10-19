@@ -51,6 +51,19 @@ def _int_field(name: str, label: str, minimum: int = 0):
     return value
 
 
+def _uploaded_photo():
+    """Return the selected camera/gallery upload, with backward compatibility.
+
+    Camera and gallery inputs have stable names. This avoids depending on a
+    JavaScript `change` event to rename a file input on mobile browsers.
+    """
+    for field_name in ("photo_camera", "photo_gallery", "photo"):
+        uploaded = request.files.get(field_name)
+        if uploaded and uploaded.filename:
+            return uploaded
+    return None
+
+
 def _outstanding_subquery():
     return (
         db.session.query(
@@ -221,7 +234,7 @@ def create_item():
             category = db.session.get(Category, category_id)
             if category is None:
                 raise ValueError("La catégorie sélectionnée n’existe pas.")
-            photo = request.files.get("photo")
+            photo = _uploaded_photo()
             photo_key = save_photo(photo)
         except (ValueError, InvalidImage) as exc:
             flash(str(exc), "error")
@@ -291,7 +304,7 @@ def edit_item(item_id):
             category = db.session.get(Category, category_id)
             if category is None:
                 raise ValueError("La catégorie sélectionnée n’existe pas.")
-            new_photo = request.files.get("photo")
+            new_photo = _uploaded_photo()
             new_photo_key = save_photo(new_photo) if new_photo and new_photo.filename else None
         except (ValueError, InvalidImage) as exc:
             flash(str(exc), "error")

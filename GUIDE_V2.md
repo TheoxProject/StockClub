@@ -50,3 +50,21 @@ Une fois le commit poussé, Render redéploie automatiquement la branche configu
 - Après le déploiement, vérifie les logs Render et attends le statut **Live** avant de tester les fonctions.
 
 Ne crée pas une deuxième base de production et ne supprime pas les données existantes pour tester la procédure d'initialisation.
+
+
+## Correctif de prise de photo mobile (V2.1)
+Le formulaire conserve les deux boutons **Prendre une photo** et **Choisir depuis la galerie**. Les champs caméra et galerie ont des noms fixes ; le serveur reconnaît les deux, sans dépendre du changement dynamique de nom par JavaScript. Le formulaire vérifie aussi la sélection au retour de la caméra. Après déploiement, teste deux ajouts successifs avec la caméra et un ajout depuis la galerie. Si le navigateur recharge complètement la page au retour de la caméra et vide le champ, cette version ne peut pas récupérer un fichier que le navigateur n'a pas conservé ; dans ce cas, le modèle du téléphone et le navigateur seront à vérifier.
+
+### Publier uniquement le correctif photo sur un dépôt V2 existant
+
+Si tu gardes ton dépôt local déjà configuré, tu peux appliquer les fichiers du ZIP `stock_club_v2_photo_patch.zip` à la racine du dépôt (sans remplacer `.env`), puis exécuter :
+
+```powershell
+git add app/templates/inventory/item_form.html app/inventory/routes.py tests/test_app.py RELEASE_NOTES_V2.md GUIDE_V2.md
+git diff --cached --check
+git diff --cached --name-only
+git commit -m "Fix mobile camera photo selection"
+git push
+```
+
+Vérifie la liste de fichiers affichée avant de committer. Render redéploiera ensuite le commit si le dépôt et la branche sont déjà reliés au service.
