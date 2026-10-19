@@ -63,7 +63,8 @@ def test_admin_can_create_one_use_invitation_and_new_user_becomes_member(client,
     assert get_response.status_code == 200
     assert "Ce lien ne peut servir qu’une seule fois" in get_response.get_data(as_text=True)
 
-    create_response = invitee_client.post(f"/auth/register/{token}", data=_registration_data())
+    proof = re.search(r'name="invitation_form_proof" value="([^"]+)"', get_response.get_data(as_text=True)).group(1)
+    create_response = invitee_client.post(f"/auth/register/{token}", data=_registration_data(invitation_form_proof=proof))
     assert create_response.status_code == 302
     assert create_response.headers["Location"].endswith("/auth/login")
 
@@ -89,7 +90,9 @@ def test_invitation_rejects_invalid_password_and_remains_usable(client, app):
     invite_url = _created_invitation_url(response)
     token = invite_url.rsplit("/", 1)[-1]
     invitee = app.test_client()
-    response = invitee.post(f"/auth/register/{token}", data=_registration_data(password="abc", password_confirmation="abc"))
+    html = invitee.get(f"/auth/register/{token}").get_data(as_text=True)
+    proof = re.search(r'name="invitation_form_proof" value="([^"]+)"', html).group(1)
+    response = invitee.post(f"/auth/register/{token}", data=_registration_data(password="abc", password_confirmation="abc", invitation_form_proof=proof))
     assert response.status_code == 200
     assert "au moins 6 caractères" in response.get_data(as_text=True)
     with app.app_context():
@@ -105,7 +108,9 @@ def test_registration_rejects_duplicate_login(client, app):
     invite_url = _created_invitation_url(client.post("/admin/invitations"))
     token = invite_url.rsplit("/", 1)[-1]
     invitee = app.test_client()
-    response = invitee.post(f"/auth/register/{token}", data=_registration_data(login="BENEVOLE-TEST"))
+    html = invitee.get(f"/auth/register/{token}").get_data(as_text=True)
+    proof = re.search(r'name="invitation_form_proof" value="([^"]+)"', html).group(1)
+    response = invitee.post(f"/auth/register/{token}", data=_registration_data(login="BENEVOLE-TEST", invitation_form_proof=proof))
     assert response.status_code == 200
     assert "déjà utilisé" in response.get_data(as_text=True)
     with app.app_context():

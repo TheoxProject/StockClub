@@ -13,7 +13,7 @@
     <h2>Créer un compte</h2>
     <p class="muted">Ce lien ne peut servir qu’une seule fois.</p>
     <form method="post" action="{{ url_for('auth.register_invitation', token=invitation_token) }}" class="stack-form" autocomplete="on">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="invitation_form_proof" value="{{ invitation_form_proof }}">
       <label for="name">Nom affiché</label>
       <input id="name" name="name" type="text" autocomplete="name" required maxlength="120" placeholder="Ex. Camille Martin" value="{{ request.form.get('name', '') }}">
       <label for="login">Nom de login</label>

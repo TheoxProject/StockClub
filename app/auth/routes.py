@@ -6,13 +6,39 @@ import secrets
 from flask import abort, current_app, flash, make_response, redirect, render_template, request, url_for
 from flask_login import current_user, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from . import bp
-from ..extensions import db
+from ..extensions import csrf, db
 from ..models import Invitation, User
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION = timedelta(minutes=10)
+
+# A signed, short-lived form proof for public one-use invitations. Unlike the
+# global Flask-WTF token, it does not require a browser session cookie: some
+# mail app in-app browsers discard that cookie between displaying and posting.
+INVITATION_FORM_MAX_AGE = 2 * 60 * 60
+
+
+def _invitation_form_signer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="stock-club-invitation-form-v1")
+
+
+def _invitation_form_proof(invitation_token: str) -> str:
+    digest = hashlib.sha256(invitation_token.encode("utf-8")).hexdigest()
+    return _invitation_form_signer().dumps(digest)
+
+
+def _valid_invitation_form_proof(invitation_token: str, proof: str) -> bool:
+    if not proof or len(proof) > 1024:
+        return False
+    try:
+        actual = _invitation_form_signer().loads(proof, max_age=INVITATION_FORM_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return False
+    expected = hashlib.sha256(invitation_token.encode("utf-8")).hexdigest()
+    return isinstance(actual, str) and hmac.compare_digest(actual, expected)
 
 
 def _utc_datetime(value):
@@ -39,7 +65,7 @@ def _valid_invitation(token: str, *, lock: bool = False):
 
 def _register_error(message: str, token: str):
     flash(message, "error")
-    response = make_response(render_template("auth/register.html", invitation_token=token), 200)
+    response = make_response(render_template("auth/register.html", invitation_token=token, invitation_form_proof=_invitation_form_proof(token)), 200)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     return response
@@ -85,6 +111,7 @@ def register():
 
 
 @bp.route("/register/<token>", methods=["GET", "POST"])
+@csrf.exempt  # This endpoint validates its own signed, invitation-bound form proof below.
 def register_invitation(token):
     """Redeem a single-use invitation. New accounts are always regular members."""
     if current_user.is_authenticated:
@@ -98,10 +125,18 @@ def register_invitation(token):
         ), 410
 
     if request.method == "GET":
-        response = make_response(render_template("auth/register.html", invitation_token=token), 200)
+        response = make_response(render_template("auth/register.html", invitation_token=token, invitation_form_proof=_invitation_form_proof(token)), 200)
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    # Validate before processing registration. The invitation URL alone is not
+    # accepted as a form submission: the GET response supplies a signed proof.
+    if not _valid_invitation_form_proof(token, request.form.get("invitation_form_proof", "")):
+        return render_template(
+            "error.html", code=400,
+            message="Le formulaire a expiré ou n’est plus valide. Rouvre le lien d’invitation et réessaie.",
+        ), 400
 
     # Re-fetch with a row lock so two simultaneous submissions cannot redeem the same link.
     invitation = _valid_invitation(token, lock=True)
