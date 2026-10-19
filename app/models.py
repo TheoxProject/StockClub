@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
-from sqlalchemy import event
+from sqlalchemy import CheckConstraint, event
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .extensions import db, login_manager
@@ -9,6 +9,16 @@ from .extensions import db, login_manager
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+class BootstrapLock(db.Model):
+    """Singleton row used to serialize first-administrator initialization."""
+
+    __tablename__ = "bootstrap_locks"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_bootstrap_locks_singleton_id"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    lock_version = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 
 
 class User(UserMixin, db.Model):

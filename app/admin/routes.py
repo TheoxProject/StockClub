@@ -87,9 +87,24 @@ def change_role(user_id):
         flash("Tu ne peux pas retirer toi-même tes droits d’administrateur.", "error")
         return redirect(url_for("admin.members"))
 
-    if user.is_active_user and user.role == "admin" and new_role != "admin" and _active_admin_count() <= 1:
-        flash("Impossible de retirer le dernier administrateur actif.", "error")
-        return redirect(url_for("admin.members"))
+    if user.is_active_user and user.role == "admin" and new_role != "admin":
+        # Lock active admin rows in deterministic order so simultaneous role
+        # changes cannot demote all active administrators at once on PostgreSQL.
+        active_admins = (
+            User.query.filter_by(role="admin", is_active_user=True)
+            .order_by(User.id.asc())
+            .with_for_update()
+            .populate_existing()
+            .all()
+        )
+        if len(active_admins) <= 1:
+            flash("Impossible de retirer le dernier administrateur actif.", "error")
+            return redirect(url_for("admin.members"))
+        # Refresh the caller's role after any lock wait. A competing request may
+        # have changed it while this request was waiting for the admin-row lock.
+        caller = User.query.filter_by(id=current_user.id).populate_existing().first()
+        if caller is None or not caller.is_active_user or caller.role != "admin":
+            abort(403)
 
     user.role = new_role
     db.session.commit()

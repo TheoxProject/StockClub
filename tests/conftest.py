@@ -2,7 +2,7 @@ import pytest
 
 from app import create_app
 from app.extensions import db
-from app.models import User
+from app.models import BootstrapLock, User
 
 
 @pytest.fixture()
@@ -20,6 +20,7 @@ def app(tmp_path):
     })
     with app.app_context():
         db.create_all()
+        db.session.add(BootstrapLock(id=1, lock_version=0))
         user = User(name="benevole-test", login="benevole-test")
         user.set_password("123456")
         db.session.add(user)

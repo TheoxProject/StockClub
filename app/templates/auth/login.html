@@ -21,7 +21,11 @@
       <label class="checkbox-line"><input type="checkbox" name="remember"> Rester connecté sur cet appareil</label>
       <button class="button button-primary button-large button-full" type="submit">Se connecter <span aria-hidden="true">→</span></button>
     </form>
-    <p class="fine-print">Nouveau bénévole ? Demande un lien d’invitation à un administrateur du club.</p>
+    {% if needs_first_admin %}
+      <p class="fine-print">Première utilisation ? <a class="text-link" href="{{ url_for('auth.first_admin') }}">Créer le premier compte administrateur</a>.</p>
+    {% else %}
+      <p class="fine-print">Nouveau bénévole ? Demande un lien d’invitation à un administrateur du club.</p>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

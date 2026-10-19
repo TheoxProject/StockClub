@@ -54,12 +54,11 @@ Ensuite remplace la valeur entre apostrophes par la chaîne Neon copiée. Cette 
 $env:DATABASE_URL = '<PASTE_THE_PRIVATE_NEON_CONNECTION_STRING_HERE>'
 $env:FLASK_DEBUG = '1'
 python -m flask --app run.py db upgrade
-python -m flask --app run.py create-user
 Remove-Item Env:DATABASE_URL
 Remove-Item Env:FLASK_DEBUG
 ```
 
-`db upgrade` crée ou met à jour les tables dans Neon et `create-user` ajoute ton premier compte. Sur une base vierge, exécute ensuite `python -m flask --app run.py promote-admin monlogin` (remplace `monlogin` par le login créé) pour lui donner les droits d’administrateur. Les membres suivants sont créés via les liens à usage unique du panneau **Membres**. Fais bien cette étape après avoir vérifié que `DATABASE_URL` cible Neon, pas le fichier SQLite local.
+`db upgrade` crée ou met à jour les tables dans Neon. Sur une base vide, après le déploiement et l'ouverture de l'URL Render, l'écran de connexion propose de créer le premier administrateur. Ne lance pas `create-user` contre Neon avant l'initialisation web si tu veux suivre ce parcours. Pour une installation locale, `python -m flask --app run.py create-user` crée lui aussi un administrateur quand la table utilisateurs est vide. Les membres suivants sont créés via les liens à usage unique du panneau **Membres**. Vérifie toujours que `DATABASE_URL` pointe vers la base voulue, et non vers une autre base par erreur.
 
 ## 3. Créer le bucket de photos Neon Object Storage
 
@@ -85,7 +84,7 @@ Documentation officielle : https://neon.com/docs/object-storage/overview
 | `S3_ACCESS_KEY_ID` | Access Key ID créé dans Neon |
 | `S3_SECRET_ACCESS_KEY` | Secret Access Key créé dans Neon |
 
-Les autres réglages importants sont déjà dans `render.yaml` : `SECRET_KEY` est générée par Render, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `REQUIRE_OBJECT_STORAGE=1` et le service écoute le port Render. Après la mise à jour des rôles, le premier compte déjà présent dans la base devient administrateur. Il pourra créer des liens d’invitation individuels depuis le panneau **Membres**. Chaque lien est à usage unique et expire après sept jours. Le fichier `render.yaml` lance `flask db upgrade` au démarrage pour appliquer les nouvelles migrations sur le forfait gratuit de Render, où les commandes de pré-déploiement et le shell ne sont pas disponibles.
+Les autres réglages importants sont déjà dans `render.yaml` : `SECRET_KEY` est générée par Render, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `REQUIRE_OBJECT_STORAGE=1` et le service écoute le port Render. La migration historique attribue l’administration au compte existant le plus ancien si nécessaire. Pour une base réellement vide, l’écran de connexion propose désormais de créer le premier administrateur ; ce parcours disparaît dès qu’un utilisateur existe. Celui-ci pourra créer des liens d’invitation individuels depuis le panneau **Membres**. Chaque lien est à usage unique et expire après sept jours. Le fichier `render.yaml` lance `flask db upgrade` au démarrage pour appliquer les nouvelles migrations sur le forfait gratuit de Render, où les commandes de pré-déploiement et le shell ne sont pas disponibles.
 
 Réglages manuels si tu n'utilises pas Blueprint :
 
@@ -129,3 +128,8 @@ Avant de déployer la version 1.4, crée si possible une sauvegarde Neon. Le `st
 La migration reprend au mieux l'historique de sortie/retour de l'ancienne version à partir des mouvements libellés « Emprunt » et « Retour ». L'ancien modèle ne liait pas chaque retour à une sortie précise : les sorties précédentes sont donc agrégées par objet et le responsable des quantités encore dehors est explicitement indiqué comme non reconstituable. Les emprunts enregistrés à partir de la 1.4 disposent d'un responsable précis et acceptent les retours partiels associés à la sortie d'origine. Vérifie la page « Matériel sorti » après le déploiement et ajuste manuellement tout reliquat ancien si nécessaire.
 
 La suppression d'un objet est accessible uniquement aux administrateurs. Elle est refusée tant qu'un emprunt n'est pas entièrement rendu. La fiche et sa photo sont supprimées, mais les lignes de l'historique sont conservées avec un instantané du nom de l'objet.
+
+
+## Mise à jour Stock Club V2
+
+La V2 conserve les parcours de la version 1.4.3 et ajoute uniquement l'initialisation sécurisée du premier administrateur ainsi qu'un verrou de concurrence lors de la rétrogradation d'un administrateur. Avant le déploiement, crée si possible une sauvegarde Neon. Render exécute `python -m flask --app run.py db upgrade` dans sa commande de démarrage et appliquera la migration `0005_admin_bootstrap`. Après le statut Live, contrôle le scénario base vide sur une base de test avant d'envisager une nouvelle installation : ne vide jamais la base de production pour tester l'initialisation.

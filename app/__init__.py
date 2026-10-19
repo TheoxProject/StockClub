@@ -78,7 +78,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     login_manager.login_message = "Connecte-toi pour accéder à l’inventaire."
     login_manager.login_message_category = "info"
 
-    from .models import Category, Item, StockMovement, User  # noqa: F401
+    from .models import BootstrapLock, Category, Item, StockMovement, User  # noqa: F401
     from .auth import bp as auth_bp
     from .inventory import bp as inventory_bp
     from .admin import bp as admin_bp
@@ -138,6 +138,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         """Create the initial database tables (safe to rerun for existing tables)."""
         with app.app_context():
             db.create_all()
+            if db.session.get(BootstrapLock, 1) is None:
+                db.session.add(BootstrapLock(id=1, lock_version=0))
+                db.session.commit()
         click.echo("Base de données initialisée.")
 
     @app.cli.command("create-user")
@@ -151,13 +154,30 @@ def create_app(test_config: dict | None = None) -> Flask:
             raise click.ClickException("Le login doit contenir de 1 à 80 caractères, sans espace ni adresse e-mail.")
         if len(password) < 6:
             raise click.ClickException("Le mot de passe doit comporter au moins 6 caractères.")
+        # Use the same singleton transaction lock as the first-admin web setup.
+        # Thus a CLI-created first account also becomes an administrator and
+        # cannot race the public first-run form into creating two first users.
+        from sqlalchemy import update
+        lock_result = db.session.execute(
+            update(BootstrapLock)
+            .where(BootstrapLock.id == 1)
+            .values(lock_version=BootstrapLock.lock_version + 1)
+        )
+        if lock_result.rowcount != 1:
+            db.session.rollback()
+            raise click.ClickException("Verrou d’initialisation absent : lance d’abord `flask --app run.py db upgrade`.")
         if User.query.filter_by(login=login_name).first():
+            db.session.rollback()
             raise click.ClickException("Ce nom de login existe déjà.")
-        user = User(name=login_name, login=login_name)
+        is_first_user = User.query.limit(1).first() is None
+        user = User(name=login_name, login=login_name, role="admin" if is_first_user else "member")
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
-        click.echo(f"Compte créé pour {login_name}.")
+        if is_first_user:
+            click.echo(f"Premier compte administrateur créé pour {login_name}.")
+        else:
+            click.echo(f"Compte membre créé pour {login_name}.")
 
     @app.cli.command("set-user-password")
     @app.cli.command("set-user-pin")

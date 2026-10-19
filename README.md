@@ -90,13 +90,14 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 Never commit `.env` or any real credentials. `.env.example` contains placeholders only.
 
-### 3. Initialise the database and create a user
+### 3. Initialise the database and create the first administrator
 
 ```bash
 python -m flask --app run.py db upgrade
-python -m flask --app run.py create-user
-python -m flask --app run.py promote-admin monlogin
+python -m flask --app run.py run --debug
 ```
+
+Open `http://127.0.0.1:5000`. When the users table is empty, the login page offers **Create the first administrator**. After that account exists, the link is hidden and direct access to first-run setup is refused. For a terminal-only setup, `python -m flask --app run.py create-user` also makes the first account an administrator if the users table is empty; later CLI-created accounts are members. Never use an empty production database to test first-run setup after real users have been added. The `promote-admin` command is retained for controlled administrator recovery only.
 
 The CLI prompts for a login and a password of at least six characters. On a fresh database, promote the first account to administrator with `python -m flask --app run.py promote-admin monlogin`. In an existing deployment, the role migration automatically promotes the oldest existing account. Administrators can create personal invitation links from **Membres**. Each link is single-use, expires after seven days, and creates a `Membre` account.
 
@@ -116,7 +117,7 @@ python -m pytest -q
 
 ## Deployment
 
-A sample Render Blueprint is included in `render.yaml`, and `DEPLOYMENT.md` describes a deployment using Render, Neon PostgreSQL, and Neon Object Storage. Version 1.4 adds migration `0004_live_search_loans`; take a Neon backup before deploying and let Render apply migrations using its configured start command.
+A sample Render Blueprint is included in `render.yaml`, and `DEPLOYMENT.md` describes a deployment using Render, Neon PostgreSQL, and Neon Object Storage. Version 2 adds migration `0005_admin_bootstrap`; take a Neon backup before deploying and let Render apply migrations using its configured start command. If the users table is empty, the login screen offers first-administrator setup. The final active administrator cannot be demoted.
 
 Before deploying:
 
