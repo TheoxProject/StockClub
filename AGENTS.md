@@ -16,9 +16,11 @@ Règles communes à l'équipe pendant l'audit :
 
 ### Autorisation et coordination
 
-- Dépôt attendu : `https://github.com/TheoxProject/stockClub.git` ; branche de travail : `main`. Ne crée pas de branche supplémentaire.
-- Les commits et le push normal vers `origin/main` sont autorisés après validation des changements demandés, sans confirmation à chaque livraison. Cette autorisation remplace les anciennes interdictions de commit/push ; elle ne couvre pas les changements sans rapport avec la mission.
-- Un push peut déclencher le déploiement automatique Render accepté par l'utilisateur. Ne modifie pas la configuration Render.
+- Dépôt attendu : `https://github.com/TheoxProject/StockClub.git`.
+- `main` est la version stable destinée à la production ; `v3` est la branche de développement et d'intégration. Travaille, crée les commits et pousse uniquement sur `v3` pour les missions demandées et validées, sans confirmation à chaque livraison.
+- Sans ordre explicite de l'utilisateur : aucun commit sur `main`, aucun push vers `main`, aucune fusion de `v3` dans `main` et aucun déclenchement volontaire d'un déploiement de production. Ces règles remplacent les anciennes autorisations de travail et de push directement sur `main`.
+- Le service Render de production doit rester associé à `main`. Préserve la compatibilité avec la procédure Render existante et ne modifie pas sa configuration. Ne présente pas l'association de branche ou l'état Render comme vérifié sans accès effectif à cet état.
+- Utilise des bases et un stockage de test indépendants de la production, avec des données et identifiants fictifs ; empêche le chargement accidentel d'une configuration de production.
 - Seul le coordinateur indexe, crée les commits et pousse. Les sous-agents développent et testent les fichiers attribués, sans opération Git d'écriture. Vérifie la fin de leurs écritures avant de préparer un commit.
 
 ### Identité et messages
@@ -34,12 +36,13 @@ Règles communes à l'équipe pendant l'audit :
 ### Préparation et synchronisation
 
 1. Lis les instructions du dépôt ; examine la branche, le distant, l'état initial et l'index. Explique tout écart de branche ou d'URL avant publication.
-2. Au début et avant le push, effectue un fetch normal. Compare `main` et `origin/main` et examine les commits locaux non publiés ; ne pousse pas implicitement des commits préexistants sans rapport avec la livraison.
+2. Au début et avant le push, effectue un fetch normal. S'il échoue, ne prétends pas connaître l'état actuel du distant. Compare `v3` et `origin/v3` et examine les commits locaux non publiés ; ne pousse pas implicitement des commits préexistants sans rapport avec la livraison.
 3. Préserve les modifications et fichiers préexistants. N'attribue pas silencieusement du travail personnel à un commit IA. Si l'attribution d'un fichier mêlant travail personnel et IA est ambiguë, sépare les portions si possible ou demande une clarification ciblée.
 4. Vérifie le diff final et exécute les tests pertinents. Indexe explicitement les fichiers ou portions concernés ; pas d'indexation globale sans revue. Vérifie le contenu exact de l'index avant le commit.
 5. Vérifie le diff à la recherche de secrets sans afficher leurs valeurs. Un secret potentiel suspend la publication concernée ; signale seulement son emplacement et son type.
 
-- Une avance rapide est autorisée si `main` est seulement en retard et le répertoire de travail est propre.
+- Si `v3` existe localement, vérifie son état puis utilise-la. Si elle existe uniquement sur `origin`, crée une branche locale qui suit `origin/v3`. Si elle n'existe nulle part, crée-la depuis `main` synchronisée avec `origin/main`. Ne réinitialise jamais une branche existante pour forcer ce résultat.
+- Une avance rapide est autorisée pour une synchronisation nécessaire si la branche est seulement en retard et le répertoire de travail est propre. Préserve les fichiers non suivis et les modifications locales lors d'une transition ; si elle n'est pas sûre, explique le blocage.
 - En cas de divergence, d'avance du distant pendant le travail ou de risque pour les modifications locales : explique la situation et propose la suite. Pas de reset destructif, nettoyage, stash automatique, rebase ou résolution de conflits improvisée.
 - Aucun push forcé, y compris `--force-with-lease`.
 
@@ -48,13 +51,13 @@ Règles communes à l'équipe pendant l'audit :
 - Ne versionne jamais de secrets, tokens, mots de passe ou `.env` réels, bases/sauvegardes, photos/données personnelles, temporaires, caches, environnements virtuels ou artefacts de test volumineux ou inutiles.
 - `.env.example` est admissible uniquement avec des valeurs fictives.
 - Examine séparément `.codex/`, `AGENTS.md`, `FIABILISATION_PHASE1.md` et `audit/`. Ne les ajoute pas automatiquement et ne les supprime pas. Distingue les instructions partageables, rapports utiles et tests réutilisables des copies de sandbox, journaux et données générées.
-- Aucun token dans le code, la configuration du projet ou l'URL distante ; ne demande pas de coller un token dans la conversation. En cas de blocage d'authentification ou de permission, explique l'action nécessaire sans contourner les restrictions.
+- Aucun token dans le code, la configuration du projet ou l'URL distante ; ne demande pas de coller un token dans la conversation et n'en crée pas. Utilise l'authentification Git existante sans modifier les identifiants. En cas d'échec, indique la commande, le contexte et l'erreur exacte sans exposer de secrets ; distingue autant que possible réseau, authentification et permission d'exécution. Ne multiplie pas les tentatives identiques et ne contourne pas les restrictions.
 
 ### Publication et compte rendu
 
 1. Après validation, crée les commits nécessaires avec l'identité IA. Vérifie leur auteur, committer, message et contenu.
-2. Effectue un seul push normal à la fin de la livraison validée, vers `origin/main`, pour éviter les déploiements intermédiaires.
-3. Vérifie la référence distante attendue et l'état local final. Si la réponse du push est interrompue ou ambiguë, consulte la référence distante avant toute nouvelle tentative.
+2. Effectue un push normal à la fin de chaque étape validée, uniquement vers `origin/v3`. La configuration du suivi `origin/v3` est autorisée ; n'envoie pas de modification vers `main`.
+3. Vérifie la branche active et son suivi, les hashes local et distant de `v3`, l'auteur, le committer, le titre et l'état local final. Si la réponse du push est interrompue ou ambiguë, consulte la référence distante avant toute nouvelle tentative.
 4. Donne les hashes et titres des commits effectivement poussés, le résumé des changements/tests, le résultat du push et sa branche distante, les fichiers laissés hors commit et l'état Render : vérifié, en cours, en échec ou non vérifié.
 
 Un push réussi ne prouve pas que Render a terminé son déploiement. Ne déclare sa réussite que si elle a réellement été vérifiée. Ces consignes partageables peuvent faire l'objet d'un commit dédié après contrôle d'absence de secrets, sans embarquer de changements applicatifs préexistants non validés.
