@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,7 +15,8 @@ from . import bp
 from ..admin.decorators import admin_required
 from ..extensions import db
 from ..models import Borrowing, BorrowingEvent, Category, Item, StockMovement, utcnow
-from ..storage import InvalidImage, delete_photo, save_photo
+from ..storage import InvalidImage, PhotoStorageError, delete_unreferenced_photo, save_photo
+from ..transactions import synchronized
 
 CONDITIONS = ["Bon état", "À contrôler", "À réparer", "Hors service"]
 
@@ -40,7 +42,7 @@ def _descendant_ids(category: Category) -> list[int]:
     return ids
 
 
-def _int_field(name: str, label: str, minimum: int = 0):
+def _int_field(name: str, label: str, minimum: int = 0, maximum: int | None = None):
     raw = request.form.get(name, "").strip()
     try:
         value = int(raw)
@@ -48,6 +50,8 @@ def _int_field(name: str, label: str, minimum: int = 0):
         raise ValueError(f"{label} doit être un nombre entier.")
     if value < minimum:
         raise ValueError(f"{label} doit être supérieur ou égal à {minimum}.")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{label} doit être inférieur ou égal à {maximum}.")
     return value
 
 
@@ -207,6 +211,7 @@ def loans():
 
 @bp.route("/items/new", methods=["GET", "POST"])
 @login_required
+@synchronized()
 def create_item():
     categories = _category_options()
     form = request.form if request.method == "POST" else {}
@@ -219,7 +224,7 @@ def create_item():
             name = request.form.get("name", "").strip()
             description = request.form.get("description", "").strip()
             category_id = _int_field("category_id", "La catégorie", minimum=1)
-            quantity = _int_field("quantity", "La quantité", minimum=0)
+            quantity = _int_field("quantity", "La quantité", minimum=0, maximum=1000000)
             unit = "unité"
             location = request.form.get("location", "").strip()
             condition = request.form.get("condition", "Bon état").strip()
@@ -231,11 +236,16 @@ def create_item():
                 raise ValueError("L’emplacement ne doit pas dépasser 160 caractères.")
             if condition not in CONDITIONS:
                 raise ValueError("Choisis un état proposé dans la liste.")
+            if category_id > 9223372036854775807:
+                raise ValueError("La catégorie sélectionnée n'existe pas.")
             category = db.session.get(Category, category_id)
             if category is None:
                 raise ValueError("La catégorie sélectionnée n’existe pas.")
             photo = _uploaded_photo()
             photo_key = save_photo(photo)
+        except PhotoStorageError as exc:
+            flash(str(exc), "error")
+            return render_template("inventory/item_form.html", item=None, categories=categories, conditions=CONDITIONS, form=form), 503
         except (ValueError, InvalidImage) as exc:
             flash(str(exc), "error")
             return render_template("inventory/item_form.html", item=None, categories=categories, conditions=CONDITIONS, form=form), 400
@@ -246,10 +256,15 @@ def create_item():
             condition=condition, photo_key=photo_key,
             created_by=current_user, updated_by=current_user,
         )
-        db.session.add(item)
-        db.session.flush()
-        db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user, delta=quantity, quantity_after=quantity, note="Stock initial"))
-        db.session.commit()
+        try:
+            db.session.add(item)
+            db.session.flush()
+            db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user, delta=quantity, quantity_after=quantity, note="Stock initial"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            delete_unreferenced_photo(photo_key)
+            raise
         flash(f"« {item.name} » a été ajouté à l’inventaire.", "success")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
 
@@ -280,6 +295,7 @@ def item_detail(item_id):
 
 @bp.route("/items/<int:item_id>/edit", methods=["GET", "POST"])
 @login_required
+@synchronized()
 def edit_item(item_id):
     item = db.get_or_404(Item, item_id)
     categories = _category_options()
@@ -301,11 +317,16 @@ def edit_item(item_id):
                 raise ValueError("L’emplacement ne doit pas dépasser 160 caractères.")
             if condition not in CONDITIONS:
                 raise ValueError("Choisis un état proposé dans la liste.")
+            if category_id > 9223372036854775807:
+                raise ValueError("La catégorie sélectionnée n'existe pas.")
             category = db.session.get(Category, category_id)
             if category is None:
                 raise ValueError("La catégorie sélectionnée n’existe pas.")
             new_photo = _uploaded_photo()
             new_photo_key = save_photo(new_photo) if new_photo and new_photo.filename else None
+        except PhotoStorageError as exc:
+            flash(str(exc), "error")
+            return render_template("inventory/item_form.html", item=item, categories=categories, conditions=CONDITIONS, form=form), 503
         except (ValueError, InvalidImage) as exc:
             flash(str(exc), "error")
             return render_template("inventory/item_form.html", item=item, categories=categories, conditions=CONDITIONS, form=form), 400
@@ -319,9 +340,15 @@ def edit_item(item_id):
         item.updated_by = current_user
         if new_photo_key:
             item.photo_key = new_photo_key
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            if new_photo_key:
+                delete_unreferenced_photo(new_photo_key)
+            raise
         if new_photo_key:
-            delete_photo(old_photo_key)
+            delete_unreferenced_photo(old_photo_key)
         flash("La fiche matériel a été mise à jour.", "success")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
     return render_template("inventory/item_form.html", item=item, categories=categories, conditions=CONDITIONS, form=form)
@@ -329,6 +356,7 @@ def edit_item(item_id):
 
 @bp.post("/items/<int:item_id>/adjust-stock")
 @login_required
+@synchronized()
 def adjust_stock(item_id):
     """Record a new outing. Returns must be linked to a particular active loan."""
     item = db.get_or_404(Item, item_id)
@@ -405,18 +433,19 @@ def adjust_stock(item_id):
 
 @bp.post("/loans/<int:loan_id>/return")
 @login_required
+@synchronized()
 def return_loan(loan_id):
-    loan = Borrowing.query.filter_by(id=loan_id).with_for_update().first_or_404()
+    loan = Borrowing.query.filter_by(id=loan_id).populate_existing().first_or_404()
     if loan.item_id is None or loan.item is None:
         flash("L’objet associé à cet emprunt n’existe plus. L’historique a été conservé.", "error")
         return redirect(url_for("inventory.loans"))
-    item = Item.query.filter_by(id=loan.item_id).with_for_update().first()
+    item = Item.query.filter_by(id=loan.item_id).populate_existing().first()
     if item is None:
         flash("Le matériel associé à cet emprunt n’existe plus.", "error")
         return redirect(url_for("inventory.loans"))
 
     try:
-        amount = _int_field("quantity", "La quantité à rendre", minimum=1)
+        amount = _int_field("quantity", "La quantité à rendre", minimum=1, maximum=1000000)
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("inventory.loans"))
@@ -426,6 +455,10 @@ def return_loan(loan_id):
     note = request.form.get("note", "").strip()
     if len(note) > 240:
         flash("Le commentaire ne doit pas dépasser 240 caractères.", "error")
+        return redirect(url_for("inventory.loans"))
+
+    if item.quantity + amount > 1000000:
+        flash("Le retour dépasserait la limite de 1 000 000 unités disponibles.", "error")
         return redirect(url_for("inventory.loans"))
 
     item.quantity += amount
@@ -455,6 +488,7 @@ def return_loan(loan_id):
 @bp.post("/items/<int:item_id>/delete")
 @login_required
 @admin_required
+@synchronized(admin=True)
 def delete_item(item_id):
     item = db.get_or_404(Item, item_id)
     open_loan = (
@@ -487,9 +521,7 @@ def delete_item(item_id):
     db.session.commit()
 
     # Only delete the photo object if no other inventory record still refers to it.
-    still_used = Item.query.filter_by(photo_key=photo_key).first() if photo_key else None
-    if photo_key and still_used is None:
-        delete_photo(photo_key)
+    delete_unreferenced_photo(photo_key)
     flash(f"« {item_name} » a été supprimé. L’historique des mouvements et emprunts est conservé.", "success")
     return redirect(url_for("inventory.index"))
 
@@ -522,6 +554,7 @@ def _sibling_name_exists(name: str, parent_id: int | None, exclude_id: int | Non
 
 @bp.route("/categories", methods=["GET", "POST"])
 @login_required
+@synchronized()
 def categories():
     """Browse and create nodes in a user-defined, arbitrarily deep category tree."""
     name_value = ""
@@ -567,6 +600,7 @@ def categories():
 
 @bp.route("/categories/<int:category_id>/edit", methods=["GET", "POST"])
 @login_required
+@synchronized()
 def edit_category(category_id):
     category = db.get_or_404(Category, category_id)
     form_name = category.name
@@ -600,6 +634,8 @@ def edit_category(category_id):
         except ValueError as exc:
             db.session.rollback()
             # Refresh model state after rollback so the form reflects the saved node.
+            if category_id > 9223372036854775807:
+                raise ValueError("La catégorie sélectionnée n'existe pas.")
             category = db.session.get(Category, category_id)
             flash(str(exc), "error")
         if parent_raw:
@@ -621,6 +657,7 @@ def edit_category(category_id):
 
 @bp.post("/categories/<int:category_id>/delete")
 @login_required
+@synchronized()
 def delete_category(category_id):
     category = db.get_or_404(Category, category_id)
     # Never cascade-delete stock references or child branches by accident.
@@ -638,6 +675,13 @@ def delete_category(category_id):
     return redirect(url_for("inventory.categories"))
 
 
+def _csv_safe(value):
+    value = value or ""
+    if value and (value[0].isspace() or unicodedata.category(value[0]).startswith("C") or value.lstrip(" \t\r\n\v\f").startswith(("=", "+", "-", "@"))):
+        return "'" + value
+    return value
+
+
 @bp.get("/items.csv")
 @login_required
 def export_csv():
@@ -646,8 +690,8 @@ def export_csv():
     writer.writerow(["Nom", "Catégorie", "Description", "Quantité", "Unité", "Emplacement", "État", "Modifié le"])
     for item in Item.query.join(Category).order_by(Item.name).all():
         writer.writerow([
-            item.name, item.category.full_path, item.description,
-            item.quantity, item.unit, item.location, item.condition,
+            _csv_safe(item.name), _csv_safe(item.category.full_path), _csv_safe(item.description),
+            item.quantity, _csv_safe(item.unit), _csv_safe(item.location), _csv_safe(item.condition),
             item.updated_at.isoformat() if item.updated_at else "",
         ])
     response = make_response("\ufeff" + output.getvalue())

@@ -9,6 +9,7 @@ from . import bp
 from .decorators import admin_required
 from ..extensions import db
 from ..models import Invitation, User
+from ..transactions import synchronized
 
 
 def _now_utc():
@@ -44,6 +45,7 @@ def members():
 
 @bp.post("/invitations")
 @admin_required
+@synchronized(admin=True)
 def create_invitation():
     # Persist only a SHA-256 hash. The raw URL is displayed once to the issuing admin.
     token = secrets.token_urlsafe(32)
@@ -64,6 +66,7 @@ def create_invitation():
 
 @bp.post("/invitations/<int:invitation_id>/cancel")
 @admin_required
+@synchronized(admin=True)
 def cancel_invitation(invitation_id):
     invitation = db.get_or_404(Invitation, invitation_id)
     if invitation.used_at is None and invitation.revoked_at is None:
@@ -77,6 +80,7 @@ def cancel_invitation(invitation_id):
 
 @bp.post("/members/<int:user_id>/role")
 @admin_required
+@synchronized(admin=True)
 def change_role(user_id):
     user = db.get_or_404(User, user_id)
     new_role = request.form.get("role", "").strip()
@@ -114,6 +118,7 @@ def change_role(user_id):
 
 @bp.post("/members/<int:user_id>/toggle-active")
 @admin_required
+@synchronized(admin=True)
 def toggle_member_active(user_id):
     user = db.get_or_404(User, user_id)
     if user.id == current_user.id:

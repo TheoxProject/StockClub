@@ -98,8 +98,10 @@
   form.querySelectorAll('select').forEach(select => select.addEventListener('change', () => updateResults(0)));
   if (reset) reset.addEventListener('click', event => {
     event.preventDefault();
-    form.reset();
-    if (window.location.pathname !== reset.href) window.history.replaceState({}, '', reset.href);
+    // reset() restores server-rendered defaults, which may already be filtered.
+    for (const control of form.elements) {
+      if (control.name) control.value = '';
+    }
     updateResults(0);
   });
   window.addEventListener('popstate', () => {

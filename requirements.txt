@@ -1,3 +1,5 @@
+# Keep Render's pip install -r requirements.txt and freeze transitive resolution.
+-c requirements.lock
 Flask>=3.1,<4.0
 Flask-SQLAlchemy>=3.1,<4.0
 Flask-Migrate>=4.0,<5.0

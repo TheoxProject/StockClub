@@ -112,8 +112,10 @@ Open <http://127.0.0.1:5000> in a browser.
 ## Run tests
 
 ```bash
-python -m pytest -q
+python -I tools/run_isolated_tests.py tests -q
 ```
+
+The isolated runner disables dotenv, confines test databases/uploads, and tests the current application sources. See [Reliability phase 1](FIABILISATION_PHASE1.md) for PostgreSQL checks, deployment compatibility, photo reconciliation, and remaining validation limits. Exact dependency versions are constrained by `requirements.lock`; the existing installation command remains `pip install -r requirements.txt`.
 
 ## Deployment
 

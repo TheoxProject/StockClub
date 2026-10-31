@@ -25,8 +25,10 @@ def _database_url() -> str:
 
 
 def create_app(test_config: dict | None = None) -> Flask:
-    load_dotenv()
-    app = Flask(__name__, instance_relative_config=True)
+    if not (test_config and test_config.get("TESTING")):
+        load_dotenv()
+    instance_path = test_config.get("INSTANCE_PATH") if test_config else None
+    app = Flask(__name__, instance_relative_config=True, instance_path=instance_path)
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     uploads = Path(app.instance_path) / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
@@ -216,12 +218,43 @@ def create_app(test_config: dict | None = None) -> Flask:
     def deactivate_user_command(login_name):
         """Disable a volunteer account without deleting its history."""
         from .models import User
-        user = User.query.filter_by(login=login_name.strip().casefold()).first()
+        from .transactions import acquire_lock
+        acquire_lock()
+        user = User.query.filter_by(login=login_name.strip().casefold()).populate_existing().first()
         if user is None:
             raise click.ClickException("Utilisateur introuvable.")
+        if user.role == "admin" and user.is_active_user and User.query.filter_by(role="admin", is_active_user=True).count() <= 1:
+            db.session.rollback()
+            raise click.ClickException("Impossible de désactiver le dernier administrateur actif.")
         user.is_active_user = False
         db.session.commit()
         click.echo(f"Compte désactivé : {user.login}.")
+
+    @app.cli.command("reconcile-photos")
+    @click.option("--apply", is_flag=True, help="Supprimer les photos gérées sans référence.")
+    def reconcile_photos_command(apply):
+        """Lister les photos orphelines ; simulation par défaut."""
+        from .storage import managed_photo_keys, delete_photo
+        from .transactions import acquire_lock
+        try:
+            acquire_lock()
+            referenced = {key for (key,) in db.session.query(Item.photo_key).all()}
+            failures = []
+            for key in managed_photo_keys():
+                if key not in referenced:
+                    if not apply:
+                        click.echo("Simulation : " + key)
+                    elif delete_photo(key):
+                        click.echo("Supprimée : " + key)
+                    else:
+                        failures.append(key)
+                        click.echo("Échec de suppression : " + key, err=True)
+            db.session.commit()
+            if failures:
+                raise click.ClickException(f"{len(failures)} photo(s) non supprimée(s) ; relance la réconciliation.")
+        except Exception as exc:
+            db.session.rollback()
+            raise click.ClickException("Réconciliation interrompue : " + str(exc)) from exc
 
     @app.cli.command("healthcheck")
     def healthcheck_command():

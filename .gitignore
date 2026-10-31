@@ -40,3 +40,7 @@ Thumbs.db
 *.swp
 *.swo
 *.log
+
+# Isolated reliability checks (binaries, databases, browser profiles, fake photos)
+.test-artifacts/
+audit/**/sandbox/
