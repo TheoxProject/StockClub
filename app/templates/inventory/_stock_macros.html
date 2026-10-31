@@ -1,0 +1,43 @@
+{% set reasons = {'achat': 'Achat', 'don': 'Don', 'perte': 'Perte', 'casse': 'Casse', 'correction': "Correction d’inventaire", 'autre': 'Autre'} %}
+{% set movements = {'initial': 'Stock initial', 'emprunt': 'Emprunt', 'retour': 'Retour', 'ajout': 'Ajout définitif', 'retrait': 'Retrait définitif', 'perte_emprunt': 'Perte sur emprunt', 'casse_emprunt': 'Casse sur emprunt'} %}
+{% set events = {'sortie': 'Sortie', 'retour': 'Retour', 'perte': 'Perte sur emprunt', 'casse': 'Casse sur emprunt'} %}
+
+{% macro stock_balances(available, outstanding) %}
+<dl class="stock-balances" data-current-balances>
+  <div><dt>Stock total</dt><dd data-stock-total>{{ available + outstanding }}</dd></div>
+  <div><dt>Disponible</dt><dd data-stock-available>{{ available }}</dd></div>
+  <div><dt>Sorti</dt><dd data-stock-out>{{ outstanding }}</dd></div>
+</dl>
+{% endmacro %}
+
+{% macro loan_accounting(loan) %}
+<p class="loan-accounting" data-loan-accounting="{{ loan.id }}">Emprunt n° {{ loan.id }} · Initialement : <strong>{{ loan.quantity_out }}</strong> · Retourné : <strong>{{ loan.quantity_returned }}</strong> · Perdu/cassé : <strong>{{ loan.quantity_lost }}</strong> · Restant à rendre : <strong>{{ loan.remaining_quantity }}</strong>{% if not loan.is_open %}<br><strong>{{ 'Soldé avec perte/casse' if loan.quantity_lost else 'Tout retourné' }}</strong>{% endif %}</p>
+{% endmacro %}
+
+{% macro movement_history(rows) %}
+<div class="movement-list">
+  {% for movement in rows %}
+    {% set lost = movement.movement_type in ['perte_emprunt', 'casse_emprunt'] %}
+    <div class="movement-row">
+      <span class="movement-sign {{ 'positive' if movement.delta > 0 else 'negative' }}">{% if lost %}−{{ movement.total_delta|abs }}<small>total</small>{% else %}{{ '+' if movement.delta > 0 else '' }}{{ movement.delta }}{% endif %}</span>
+      <div class="movement-content">
+        <strong>{{ movements.get(movement.movement_type, movement.note or 'Mouvement ancien') }}{% if movement.reason %} · {{ reasons.get(movement.reason, movement.reason) }}{% endif %}</strong>
+        {% if movement.note and movement.movement_type != 'legacy' %}<span>{{ movement.note }}</span>{% endif %}
+        <span>{{ movement.user.name if movement.user else 'Compte supprimé' }} · {{ movement.created_at|localdatetime if movement.created_at else '' }}{% if movement.borrowing_id %} · Emprunt n° {{ movement.borrowing_id }}{% endif %}</span>
+        <span class="movement-impacts">Disponible : {{ '+' if movement.delta > 0 else '' }}{{ movement.delta }}{% if movement.total_delta is not none %} · Stock total : {{ '+' if movement.total_delta > 0 else '' }}{{ movement.total_delta }}{% endif %}</span>
+      </div>
+      <span class="movement-after">{{ movement.quantity_after }}<small>disponible après</small></span>
+    </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro loan_events(rows, link_to_item=false) %}
+  {% for event in rows %}
+    <div class="loan-event-row">
+      <span class="movement-sign {{ 'positive' if event.event_type == 'retour' else 'negative' }}">{{ '↙' if event.event_type == 'retour' else ('×' if event.event_type in ['perte', 'casse'] else '↗') }} {{ event.quantity }}</span>
+      <div class="movement-content"><strong>{{ events.get(event.event_type, 'Événement') }} · {{ event.item_name_snapshot }}</strong><span>{{ event.user.name if event.user else 'Compte supprimé ou historique ancien' }} · {{ event.created_at|localdatetime if event.created_at else '' }}{% if event.note %} · {{ event.note }}{% endif %}</span>{% if event.borrowing %}{{ loan_accounting(event.borrowing) }}{% endif %}</div>
+      {% if link_to_item and event.item %}<a class="text-link" href="{{ url_for('inventory.item_detail', item_id=event.item.id) }}">Fiche ↗</a>{% endif %}
+    </div>
+  {% endfor %}
+{% endmacro %}

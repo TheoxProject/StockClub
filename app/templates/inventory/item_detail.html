@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "inventory/_stock_macros.html" import stock_balances, movement_history, loan_events, loan_accounting with context %}
 {% block title %}{{ item.name }}{% endblock %}
 {% block content %}
 <div class="detail-page">
@@ -10,15 +11,15 @@
       <h1>{{ item.name }}</h1>
       <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
       {% if item.description %}<p class="detail-description">{{ item.description }}</p>{% else %}<p class="muted">Aucune description renseignée.</p>{% endif %}
-      <div class="detail-actions"><a class="button button-secondary" href="{{ url_for('inventory.edit_item', item_id=item.id) }}">✎ Modifier la fiche</a><a class="button button-quiet" href="{{ url_for('inventory.categories') }}">Gérer les catégories</a><a class="button button-quiet" href="{{ url_for('inventory.loans') }}">Voir le matériel sorti ↗</a></div>
+      <div class="detail-actions"><a class="button button-secondary" href="{{ url_for('inventory.edit_item', item_id=item.id) }}">✎ Modifier la fiche</a>{% if current_user.is_admin %}<a class="button button-primary" href="{{ url_for('inventory.stock_adjustment', item_id=item.id) }}">Ajuster le stock</a>{% endif %}<a class="button button-quiet" href="{{ url_for('inventory.categories') }}">Gérer les catégories</a><a class="button button-quiet" href="{{ url_for('inventory.loans') }}">Voir le matériel sorti ↗</a></div>
     </div>
   </section>
 
   <section class="detail-grid">
     <article class="panel stock-panel">
-      <div class="panel-heading"><div><span class="eyebrow">STOCK DISPONIBLE</span><h2>Quantité</h2></div><span class="stat-icon stat-icon-green" aria-hidden="true">□</span></div>
-      <div class="large-quantity">{{ item.quantity }} <span>unité{% if item.quantity > 1 %}s{% endif %} disponible{% if item.quantity > 1 %}s{% endif %}</span></div>
-      <p class="loan-summary-line"><strong>{{ outstanding_quantity }}</strong> unité{% if outstanding_quantity > 1 %}s{% endif %} encore à l’extérieur.</p>
+      <div class="panel-heading"><div><span class="eyebrow">MATÉRIEL DÉTENU</span><h2>Quantités</h2></div><span class="stat-icon stat-icon-green" aria-hidden="true">□</span></div>
+      {{ stock_balances(item.quantity, outstanding_quantity) }}
+      <p class="field-hint">Stock total = Disponible + Sorti. Le matériel sorti reste à rendre tant qu’aucun retour, perte ou casse n’est enregistré.</p>
       {% if item.location %}<p class="location-line">⌖ <strong>Emplacement :</strong> {{ item.location }}</p>{% else %}<p class="muted">Aucun emplacement renseigné.</p>{% endif %}
       <form class="stock-adjust-form" action="{{ url_for('inventory.adjust_stock', item_id=item.id) }}" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -32,7 +33,7 @@
     </article>
     <article class="panel history-panel">
       <div class="panel-heading"><div><span class="eyebrow">TRAÇABILITÉ</span><h2>Historique du stock</h2></div></div>
-      {% if item.movements %}<div class="movement-list">{% for movement in item.movements[:20] %}<div class="movement-row"><span class="movement-sign {% if movement.delta > 0 %}positive{% else %}negative{% endif %}">{% if movement.delta > 0 %}+{% endif %}{{ movement.delta }}</span><div class="movement-content"><strong>{{ movement.note or 'Aucun commentaire' }}</strong><span>{{ movement.user.name if movement.user else 'Compte supprimé' }} · {{ movement.created_at|localdatetime if movement.created_at else '' }}</span></div><span class="movement-after">{{ movement.quantity_after }}</span></div>{% endfor %}</div>{% else %}<p class="muted">Aucun mouvement enregistré.</p>{% endif %}
+      {% if item.movements %}{{ movement_history(item.movements[:20]) }}{% else %}<p class="muted">Aucun mouvement enregistré.</p>{% endif %}
     </article>
   </section>
 
@@ -46,14 +47,16 @@
             <div class="movement-content"><strong>{{ loan.quantity_out }} unité{% if loan.quantity_out > 1 %}s{% endif %} sortie{% if loan.quantity_out > 1 %}s{% endif %} · encore dehors : {{ loan.remaining_quantity }}</strong><span>{{ loan.user.name if loan.user else 'Responsable non renseigné (ancienne version)' }} · {{ loan.created_at|localdatetime if loan.created_at else '' }}{% if loan.note %} · {{ loan.note }}{% endif %}</span></div>
             <a class="text-link" href="{{ url_for('inventory.loans') }}">Gérer le retour ↗</a>
           </div>
+          {{ loan_accounting(loan) }}
+          {% if current_user.is_admin %}<p class="write-off-action"><a class="button button-danger" href="{{ url_for('inventory.write_off_loan', loan_id=loan.id) }}">Déclarer une perte ou une casse</a></p>{% endif %}
         {% endfor %}
       </div>
     {% else %}
       <div class="empty-state compact"><h3>Aucune sortie en cours</h3><p>Aucune unité de cet objet n’est enregistrée comme étant à l’extérieur.</p></div>
     {% endif %}
     {% if recent_loan_events %}
-      <div class="panel loan-events loan-history-section"><div class="panel-heading"><div><h2>Historique des sorties et retours</h2></div><a class="text-link" href="{{ url_for('inventory.loans') }}">Tout voir ↗</a></div>
-        {% for event in recent_loan_events %}<div class="loan-event-row"><span class="movement-sign {% if event.event_type == 'retour' %}positive{% else %}negative{% endif %}">{% if event.event_type == 'retour' %}↙{% else %}↗{% endif %} {{ event.quantity }}</span><div class="movement-content"><strong>{{ 'Retour' if event.event_type == 'retour' else 'Sortie' }} · {{ event.item_name_snapshot }}</strong><span>{{ event.user.name if event.user else 'Compte supprimé ou historique ancien' }} · {{ event.created_at|localdatetime if event.created_at else '' }}{% if event.note %} · {{ event.note }}{% endif %}</span></div></div>{% endfor %}
+      <div class="panel loan-events loan-history-section"><div class="panel-heading"><div><h2>Historique des sorties et retours, pertes et casses</h2></div><a class="text-link" href="{{ url_for('inventory.loans') }}">Tout voir ↗</a></div>
+        {{ loan_events(recent_loan_events) }}
       </div>
     {% endif %}
   </section>
@@ -64,7 +67,7 @@
       <form method="post" action="{{ url_for('inventory.delete_item', item_id=item.id) }}" onsubmit="return confirm('Supprimer définitivement cet objet ? L’historique sera conservé, mais cette action ne peut pas être annulée.');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="button button-danger" {% if outstanding_quantity > 0 %}disabled title="Des unités sont encore à l’extérieur"{% endif %}><span aria-hidden="true">⌫</span> Supprimer l’objet</button>
-        {% if outstanding_quantity > 0 %}<span class="admin-only-hint">Retourner les {{ outstanding_quantity }} unité(s) encore à l’extérieur avant suppression.</span>{% endif %}
+        {% if outstanding_quantity > 0 %}<span class="admin-only-hint">Régler les {{ outstanding_quantity }} unité(s) encore sorties avant suppression.</span>{% endif %}
       </form>
     {% else %}
       <div><button type="button" class="button button-danger" disabled title="Réservé aux administrateurs"><span aria-hidden="true">⌫</span> Supprimer l’objet</button><span class="admin-only-hint">🔒 Réservé aux administrateurs</span></div>

@@ -12,7 +12,7 @@
         <h3>{{ item.name }}</h3>
         <p class="item-description">{{ item.description or 'Aucune description renseignée.' }}</p>
         <div class="item-card-bottom"><span class="stock-amount"><strong>{{ item.quantity }}</strong> disponible{% if item.quantity > 1 %}s{% endif %}</span><span class="item-arrow" aria-hidden="true">↗</span></div>
-        {% if out_quantity > 0 %}<span class="out-quantity-note">↗ {{ out_quantity }} unité{% if out_quantity > 1 %}s{% endif %} encore à l’extérieur</span>{% endif %}
+        <span class="out-quantity-note">Stock total : {{ item.quantity + out_quantity }} · Sorti : {{ out_quantity }}</span>
         {% if item.location %}<span class="item-location">⌖ {{ item.location }}</span>{% endif %}
       </div>
     </a>

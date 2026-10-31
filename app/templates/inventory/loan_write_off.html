@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "inventory/_stock_macros.html" import stock_balances, loan_accounting %}
+{% block title %}Déclarer une perte ou une casse{% endblock %}
+{% block content %}
+<div class="form-page">
+  <a class="back-link" href="{{ url_for('inventory.loans') }}">← Retour au matériel sorti</a>
+  <section class="form-intro"><span class="eyebrow">MATÉRIEL EMPRUNTÉ</span><h1>Déclarer une perte ou une casse</h1><p>{{ loan.item_name_snapshot }}</p><p class="muted">Cette déclaration diminue le stock total et le restant à rendre. Elle n’ajoute rien au disponible et ne constitue pas un retour.</p></section>
+  {{ stock_balances(item.quantity, outstanding_quantity) }}
+  {{ loan_accounting(loan) }}
+  {% if remaining > 0 %}
+  <form method="post" class="form-card stack-form" data-stock-operation="write-off" data-available="{{ item.quantity }}" data-outstanding="{{ outstanding_quantity }}" data-remaining="{{ remaining }}" data-maximum="1000000">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field"><label for="quantity">Quantité perdue ou cassée</label><input id="quantity" name="quantity" type="number" min="1" max="{{ remaining }}" step="1" inputmode="numeric" required value="{{ form.get('quantity', '1') }}"></div>
+    <div class="field"><label for="reason">Motif</label><select id="reason" name="reason" required><option value="">Choisir un motif</option><option value="perte" {% if form.get('reason') == 'perte' %}selected{% endif %}>Perte</option><option value="casse" {% if form.get('reason') == 'casse' %}selected{% endif %}>Casse</option></select></div>
+    <div class="field"><label for="detail">Précision (facultatif)</label><textarea id="detail" name="detail" maxlength="240" rows="3">{{ form.get('detail', '') }}</textarea></div>
+    <section class="stock-preview" data-stock-preview aria-live="polite" aria-atomic="true"><h2>Après la déclaration envisagée</h2><dl class="stock-balances"><div><dt>Stock total</dt><dd><output data-preview-total>—</output></dd></div><div><dt>Disponible</dt><dd><output data-preview-available>—</output></dd></div><div><dt>Sorti</dt><dd><output data-preview-out>—</output></dd></div></dl><p>Restant à rendre sur cet emprunt : <strong><output data-preview-remaining>—</output></strong></p><p data-preview-error class="form-feedback" hidden></p><p class="field-hint">Aperçu indicatif : les quantités courantes seront vérifiées à l’enregistrement.</p></section>
+    <div class="form-actions"><a class="button button-quiet" href="{{ url_for('inventory.loans') }}">Annuler</a><button type="submit" class="button button-danger button-large">Enregistrer la perte ou la casse</button></div>
+  </form>
+  {% else %}<div class="panel"><p>Cet emprunt est déjà soldé. Aucune quantité ne reste à déclarer.</p></div>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/stock-adjustments.js') }}"></script>{% endblock %}

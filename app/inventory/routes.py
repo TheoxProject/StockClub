@@ -72,11 +72,11 @@ def _outstanding_subquery():
     return (
         db.session.query(
             Borrowing.item_id.label("item_id"),
-            db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned).label("outstanding_quantity"),
+            db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost).label("outstanding_quantity"),
         )
         .filter(
             Borrowing.item_id.isnot(None),
-            Borrowing.quantity_out > Borrowing.quantity_returned,
+            Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost,
         )
         .group_by(Borrowing.item_id)
         .subquery()
@@ -149,11 +149,11 @@ def index():
         rows = (
             db.session.query(
                 Borrowing.item_id,
-                db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned),
+                db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost),
             )
             .filter(
                 Borrowing.item_id.in_([item.id for item in items]),
-                Borrowing.quantity_out > Borrowing.quantity_returned,
+                Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost,
             )
             .group_by(Borrowing.item_id)
             .all()
@@ -173,6 +173,8 @@ def index():
 
     total_references = Item.query.count()
     total_units = db.session.query(db.func.coalesce(db.func.sum(Item.quantity), 0)).scalar()
+    total_outstanding = int(db.session.query(db.func.coalesce(db.func.sum(_outstanding_subquery().c.outstanding_quantity), 0)).scalar())
+    total_stock = int(total_units) + total_outstanding
     attention_count = Item.query.filter(Item.condition.in_(["À contrôler", "À réparer", "Hors service"])).count()
     return render_template(
         "inventory/index.html",
@@ -186,6 +188,7 @@ def index():
         has_filters=bool(search or selected_category or availability or quantity_min is not None),
         total_references=total_references,
         total_units=total_units,
+        total_outstanding=total_outstanding, total_stock=total_stock,
         attention_count=attention_count,
     )
 
@@ -195,7 +198,7 @@ def index():
 def loans():
     active_loans = (
         Borrowing.query
-        .filter(Borrowing.quantity_out > Borrowing.quantity_returned)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost)
         .filter(Borrowing.item_id.isnot(None))
         .order_by(Borrowing.created_at.asc(), Borrowing.id.asc())
         .all()
@@ -259,7 +262,7 @@ def create_item():
         try:
             db.session.add(item)
             db.session.flush()
-            db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user, delta=quantity, quantity_after=quantity, note="Stock initial"))
+            db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user, delta=quantity, quantity_after=quantity, note="Stock initial", movement_type="initial", total_delta=quantity))
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -277,7 +280,7 @@ def item_detail(item_id):
     item = db.get_or_404(Item, item_id)
     active_borrowings = (
         Borrowing.query.filter_by(item_id=item.id)
-        .filter(Borrowing.quantity_out > Borrowing.quantity_returned)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost)
         .order_by(Borrowing.created_at.asc(), Borrowing.id.asc()).all()
     )
     recent_loan_events = (
@@ -425,6 +428,7 @@ def adjust_stock(item_id):
     db.session.add(StockMovement(
         item=item, item_name_snapshot=item.name, user=current_user,
         delta=-amount, quantity_after=item.quantity, note=movement_note,
+        movement_type="emprunt", total_delta=0, borrowing_id=borrowing.id,
     ))
     db.session.commit()
     flash(f"Sortie enregistrée : {amount} unité{'s' if amount > 1 else ''}. Il reste {item.quantity} unité{'s' if item.quantity > 1 else ''} disponible{'s' if item.quantity > 1 else ''}.", "success")
@@ -476,13 +480,132 @@ def return_loan(loan_id):
     db.session.add(StockMovement(
         item=item, item_name_snapshot=loan.item_name_snapshot, user=current_user,
         delta=amount, quantity_after=item.quantity, note=movement_note,
+        movement_type="retour", total_delta=0, borrowing_id=loan.id,
     ))
     db.session.commit()
-    if loan.remaining_quantity == 0:
+    if loan.remaining_quantity == 0 and not loan.quantity_lost:
         flash(f"Retour complet enregistré pour « {loan.item_name_snapshot} ».", "success")
+    elif loan.remaining_quantity == 0:
+        flash("Retour enregistré ; cet emprunt est clôturé avec des pertes.", "success")
     else:
         flash(f"Retour partiel enregistré. Il reste {loan.remaining_quantity} unité(s) à l’extérieur.", "success")
     return redirect(url_for("inventory.loans"))
+
+
+
+ADJUSTMENT_REASONS = {
+    "add": ["achat", "don", "correction", "autre"],
+    "remove": ["perte", "casse", "correction", "autre"],
+}
+
+
+def _item_outstanding(item_id):
+    return int(db.session.query(db.func.coalesce(db.func.sum(
+        Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost
+    ), 0)).filter(Borrowing.item_id == item_id,
+                 Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).scalar())
+
+
+@bp.route("/items/<int:item_id>/stock-adjustment", methods=["GET", "POST"])
+@login_required
+@admin_required
+@synchronized(admin=True)
+def stock_adjustment(item_id):
+    item = Item.query.filter_by(id=item_id).populate_existing().first()
+    if item is None:
+        flash("Ce matériel n'existe plus.", "error")
+        return redirect(url_for("inventory.index"))
+    form = request.form if request.method == "POST" else request.args
+    operation = form.get("operation", "add").strip()
+    reasons = ADJUSTMENT_REASONS.get(operation, [])
+    outstanding_quantity = _item_outstanding(item.id)
+    total_quantity = item.quantity + outstanding_quantity
+    if request.method == "POST":
+        try:
+            if operation not in ADJUSTMENT_REASONS:
+                raise ValueError("Choisis un ajout ou un retrait.")
+            amount = _int_field("quantity", "La quantité", minimum=1, maximum=1000000)
+            reason = form.get("reason", "").strip()
+            detail = form.get("detail", "").strip()
+            if reason not in reasons:
+                raise ValueError("Choisis un motif proposé pour cette opération.")
+            if len(detail) > 240 or (reason == "autre" and not detail):
+                raise ValueError("La précision est obligatoire pour « autre » et limitée à 240 caractères.")
+            if operation == "add" and total_quantity + amount > 1000000:
+                raise ValueError("Le stock total ne peut pas dépasser 1 000 000 unités.")
+            if operation == "remove" and amount > item.quantity:
+                raise ValueError("Le retrait dépasse la quantité disponible.")
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return render_template("inventory/stock_adjustment.html", item=item, outstanding_quantity=outstanding_quantity,
+                                   total_quantity=total_quantity, form=form, reasons=reasons), 400
+        delta = amount if operation == "add" else -amount
+        item.quantity += delta
+        item.updated_by = current_user
+        item.updated_at = utcnow()
+        db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user,
+                                     delta=delta, quantity_after=item.quantity, total_delta=delta,
+                                     movement_type="ajout" if operation == "add" else "retrait",
+                                     reason=reason, note=detail))
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
+        flash("Ajustement du stock enregistré.", "success")
+        return redirect(url_for("inventory.item_detail", item_id=item.id))
+    return render_template("inventory/stock_adjustment.html", item=item, outstanding_quantity=outstanding_quantity,
+                           total_quantity=total_quantity, form=form, reasons=reasons)
+
+
+@bp.route("/loans/<int:loan_id>/write-off", methods=["GET", "POST"])
+@login_required
+@admin_required
+@synchronized(admin=True)
+def write_off_loan(loan_id):
+    loan = Borrowing.query.filter_by(id=loan_id).populate_existing().first()
+    item = Item.query.filter_by(id=loan.item_id).populate_existing().first() if loan and loan.item_id else None
+    if loan is None or item is None:
+        flash("Cet emprunt ou son matériel n'existe plus.", "error")
+        return redirect(url_for("inventory.loans"))
+    remaining = loan.remaining_quantity
+    outstanding_quantity = _item_outstanding(item.id)
+    total_quantity = item.quantity + outstanding_quantity
+    form = request.form if request.method == "POST" else {}
+    if request.method == "POST":
+        try:
+            amount = _int_field("quantity", "La quantité", minimum=1, maximum=1000000)
+            reason = form.get("reason", "").strip()
+            detail = form.get("detail", "").strip()
+            if reason not in {"perte", "casse"}:
+                raise ValueError("Choisis perte ou casse.")
+            if len(detail) > 240:
+                raise ValueError("La précision ne doit pas dépasser 240 caractères.")
+            if amount > remaining:
+                raise ValueError(f"La quantité dépasse les {remaining} unités encore sorties.")
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return render_template("inventory/loan_write_off.html", loan=loan, item=item, remaining=remaining,
+                                   outstanding_quantity=outstanding_quantity, total_quantity=total_quantity, form=form), 400
+        loan.quantity_lost += amount
+        if loan.remaining_quantity == 0:
+            loan.closed_at = utcnow()
+        item.updated_by = current_user
+        item.updated_at = utcnow()
+        db.session.add(BorrowingEvent(borrowing=loan, item=item, item_name_snapshot=loan.item_name_snapshot,
+                                      user=current_user, event_type=reason, quantity=amount, note=detail))
+        db.session.add(StockMovement(item=item, item_name_snapshot=loan.item_name_snapshot, user=current_user,
+                                     borrowing_id=loan.id, delta=0, quantity_after=item.quantity,
+                                     movement_type=f"{reason}_emprunt", total_delta=-amount, reason=reason, note=detail))
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
+        flash("Perte ou casse enregistrée pour cet emprunt.", "success")
+        return redirect(url_for("inventory.loans"))
+    return render_template("inventory/loan_write_off.html", loan=loan, item=item, remaining=remaining,
+                           outstanding_quantity=outstanding_quantity, total_quantity=total_quantity, form=form)
 
 
 @bp.post("/items/<int:item_id>/delete")
@@ -493,12 +616,12 @@ def delete_item(item_id):
     item = db.get_or_404(Item, item_id)
     open_loan = (
         Borrowing.query.filter_by(item_id=item.id)
-        .filter(Borrowing.quantity_out > Borrowing.quantity_returned)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost)
         .first()
     )
     if open_loan:
         flash(
-            f"Impossible de supprimer « {item.name} » : du matériel est encore à l’extérieur. Enregistre d’abord tous les retours.",
+            f"Impossible de supprimer « {item.name} » : du matériel est encore à l’extérieur. Solde d’abord les emprunts par des retours ou des déclarations de perte ou de casse.",
             "error",
         )
         return redirect(url_for("inventory.item_detail", item_id=item.id))
@@ -687,12 +810,15 @@ def _csv_safe(value):
 def export_csv():
     output = io.StringIO(newline="")
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Nom", "Catégorie", "Description", "Quantité", "Unité", "Emplacement", "État", "Modifié le"])
+    writer.writerow(["Nom", "Cat\u00e9gorie", "Description", "Disponible", "Unit\u00e9", "Emplacement", "\u00c9tat", "Modifi\u00e9 le", "Stock total", "Sorti"])
+    outstanding = _outstanding_subquery()
+    quantities = dict(db.session.query(outstanding.c.item_id, outstanding.c.outstanding_quantity).all())
     for item in Item.query.join(Category).order_by(Item.name).all():
         writer.writerow([
             _csv_safe(item.name), _csv_safe(item.category.full_path), _csv_safe(item.description),
             item.quantity, _csv_safe(item.unit), _csv_safe(item.location), _csv_safe(item.condition),
             item.updated_at.isoformat() if item.updated_at else "",
+            item.quantity + int(quantities.get(item.id, 0)), int(quantities.get(item.id, 0)),
         ])
     response = make_response("\ufeff" + output.getvalue())
     response.headers["Content-Type"] = "text/csv; charset=utf-8"

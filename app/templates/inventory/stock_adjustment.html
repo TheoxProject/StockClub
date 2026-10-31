@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "inventory/_stock_macros.html" import stock_balances %}
+{% block title %}Ajuster le stock · {{ item.name }}{% endblock %}
+{% block content %}
+<div class="form-page">
+  <a class="back-link" href="{{ url_for('inventory.item_detail', item_id=item.id) }}">← Retour à la fiche</a>
+  <section class="form-intro"><span class="eyebrow">ADMINISTRATION DU STOCK</span><h1>Ajuster le stock</h1><p>{{ item.name }}</p><p class="muted">Ajoute du matériel ou retire définitivement des unités disponibles. Les emprunts en cours ne sont pas modifiés.</p></section>
+  {{ stock_balances(item.quantity, outstanding_quantity) }}
+  <form method="post" class="form-card stack-form" data-stock-operation="adjustment" data-available="{{ item.quantity }}" data-outstanding="{{ outstanding_quantity }}" data-maximum="1000000">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field"><label for="operation">Opération</label><select id="operation" name="operation" required><option value="add" {% if form.get('operation', 'add') == 'add' %}selected{% endif %}>Ajout</option><option value="remove" {% if form.get('operation') == 'remove' %}selected{% endif %}>Retrait définitif</option></select></div>
+    <div class="field"><label for="quantity">Quantité</label><input id="quantity" name="quantity" type="number" min="1" max="1000000" step="1" inputmode="numeric" required value="{{ form.get('quantity', '1') }}"></div>
+    <div class="field"><label for="reason">Motif</label><select id="reason" name="reason" required><option value="">Choisir un motif</option>{% for code, label, operations in [('achat', 'Achat', 'add'), ('don', 'Don', 'add'), ('perte', 'Perte', 'remove'), ('casse', 'Casse', 'remove'), ('correction', 'Correction d’inventaire', 'add remove'), ('autre', 'Autre', 'add remove')] %}<option value="{{ code }}" data-operations="{{ operations }}" {% if code == form.get('reason') %}selected{% endif %} {% if code not in reasons %}hidden disabled{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="detail">Précision <span data-detail-required>(obligatoire pour « Autre »)</span></label><textarea id="detail" name="detail" maxlength="240" rows="3" {% if form.get('reason') == 'autre' %}required{% endif %}>{{ form.get('detail', '') }}</textarea></div>
+    <section class="stock-preview" data-stock-preview aria-live="polite" aria-atomic="true"><h2>Après l’ajustement envisagé</h2><dl class="stock-balances"><div><dt>Stock total</dt><dd><output data-preview-total>—</output></dd></div><div><dt>Disponible</dt><dd><output data-preview-available>—</output></dd></div><div><dt>Sorti</dt><dd><output data-preview-out>—</output></dd></div></dl><p data-preview-error class="form-feedback" hidden></p><p class="field-hint">Aperçu indicatif : les quantités courantes seront vérifiées à l’enregistrement.</p></section>
+    <div class="form-actions"><a class="button button-quiet" href="{{ url_for('inventory.item_detail', item_id=item.id) }}">Annuler</a><button type="submit" class="button button-primary button-large">Enregistrer l’ajustement</button></div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/stock-adjustments.js') }}"></script>{% endblock %}

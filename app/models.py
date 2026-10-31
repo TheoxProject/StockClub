@@ -133,6 +133,14 @@ class Item(db.Model):
     )
 
     @property
+    def outstanding_quantity(self) -> int:
+        return sum(loan.remaining_quantity for loan in self.borrowings)
+
+    @property
+    def total_quantity(self) -> int:
+        return self.quantity + self.outstanding_quantity
+
+    @property
     def condition_css(self) -> str:
         return {
             "Bon état": "good",
@@ -149,6 +157,10 @@ class StockMovement(db.Model):
     item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
     item_name_snapshot = db.Column(db.String(160), nullable=False, default="Objet supprimé")
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    borrowing_id = db.Column(db.Integer, db.ForeignKey("borrowings.id", ondelete="SET NULL"), nullable=True)
+    movement_type = db.Column(db.String(30), nullable=False, default="legacy", server_default="legacy")
+    total_delta = db.Column(db.Integer, nullable=True)
+    reason = db.Column(db.String(30), nullable=False, default="", server_default="")
     delta = db.Column(db.Integer, nullable=False)
     quantity_after = db.Column(db.Integer, nullable=False)
     note = db.Column(db.String(240), nullable=False, default="")
@@ -177,6 +189,7 @@ class Borrowing(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     quantity_out = db.Column(db.Integer, nullable=False)
     quantity_returned = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    quantity_lost = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     note = db.Column(db.String(240), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     closed_at = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -187,7 +200,7 @@ class Borrowing(db.Model):
 
     @property
     def remaining_quantity(self) -> int:
-        return max(0, self.quantity_out - self.quantity_returned)
+        return max(0, self.quantity_out - (self.quantity_returned or 0) - (self.quantity_lost or 0))
 
     @property
     def is_open(self) -> bool:
@@ -195,7 +208,7 @@ class Borrowing(db.Model):
 
 
 class BorrowingEvent(db.Model):
-    """Immutable ledger entry recording an actual outing or return."""
+    """Immutable ledger entry for an outing, return, loss or breakage."""
 
     __tablename__ = "borrowing_events"
 
@@ -204,7 +217,7 @@ class BorrowingEvent(db.Model):
     item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
     item_name_snapshot = db.Column(db.String(160), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    event_type = db.Column(db.String(20), nullable=False)  # "sortie" or "retour"
+    event_type = db.Column(db.String(20), nullable=False)  # "sortie", "retour", "perte" or "casse"
     quantity = db.Column(db.Integer, nullable=False)
     note = db.Column(db.String(240), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)

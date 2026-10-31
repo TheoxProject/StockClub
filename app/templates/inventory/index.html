@@ -10,9 +10,11 @@
   <a class="button button-primary heading-action" href="{{ url_for('inventory.create_item') }}"><span aria-hidden="true">＋</span> Ajouter un objet</a>
 </section>
 
-<section class="stats-grid" aria-label="Résumé de l’inventaire">
+<section class="stats-grid stock-overview" aria-label="Résumé de l’inventaire">
   <article class="stat-card"><span class="stat-icon stat-icon-green" aria-hidden="true">▦</span><div><span class="stat-label">Références</span><strong>{{ total_references }}</strong><small>types de matériel</small></div></article>
-  <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">□</span><div><span class="stat-label">Unités disponibles</span><strong>{{ total_units }}</strong><small>hors matériel sorti</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">□</span><div><span class="stat-label">Stock total</span><strong>{{ total_stock }}</strong><small>disponible + sorti</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-green" aria-hidden="true">□</span><div><span class="stat-label">Disponible</span><strong>{{ total_units }}</strong><small>pouvant être emprunté</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">↗</span><div><span class="stat-label">Sorti</span><strong>{{ total_outstanding }}</strong><small>restant à rendre</small></div></article>
   <article class="stat-card"><span class="stat-icon stat-icon-rose" aria-hidden="true">!</span><div><span class="stat-label">À surveiller</span><strong>{{ attention_count }}</strong><small>références à contrôler ou réparer</small></div></article>
 </section>
 

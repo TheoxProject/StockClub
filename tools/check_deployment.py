@@ -1,6 +1,7 @@
-"""Deployment checks on empty/previous-version fictitious databases only.
+"""Deployment checks on empty/current-head fictitious databases only.
 
 Run with tools/run_isolated_tests.py, never against an existing application DB.
+The real populated 0005 upgrade is covered by test_v3_stock_migration.py.
 """
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -18,7 +19,7 @@ from flask_migrate import upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
 
-@pytest.mark.parametrize("populated", [False, True], ids=["empty", "previous-populated"])
+@pytest.mark.parametrize("populated", [False, True], ids=["empty", "populated-head"])
 def test_existing_render_migration_and_entrypoint(tmp_path, populated, monkeypatch):
     url = os.environ.get("STOCKCLUB_TEST_DATABASE_URL", "sqlite:///" + (tmp_path / "deployment.db").as_posix())
     parsed = make_url(url)
@@ -45,7 +46,7 @@ def test_existing_render_migration_and_entrypoint(tmp_path, populated, monkeypat
     try:
         with app.app_context():
             upgrade(directory=str(ROOT / "migrations"))
-            assert db.session.execute(db.text("SELECT version_num FROM alembic_version")).scalar_one() == "0005_admin_bootstrap"
+            assert db.session.execute(db.text("SELECT version_num FROM alembic_version")).scalar_one() == "0006_stock_adjustments"
             assert db.session.execute(db.text("SELECT COUNT(*) FROM bootstrap_locks WHERE id=1")).scalar_one() == 1
             if populated:
                 user = User(name="Fictitious previous admin", login="previous-admin", role="admin")
@@ -100,7 +101,7 @@ def test_existing_render_migration_and_entrypoint(tmp_path, populated, monkeypat
         health = entry.app.test_cli_runner().invoke(args=["healthcheck"])
         assert health.exit_code == 0, health.output
         assert "OK" in health.output
-        print(f"DEPLOYMENT {parsed.get_backend_name()} populated={populated}: upgrade 0005 unchanged, run:app loaded, health 200, CLI OK; S3 not contacted")
+        print(f"DEPLOYMENT {parsed.get_backend_name()} populated={populated}: head 0006 preserved, run:app loaded, health 200, CLI OK; S3 not contacted")
     finally:
         clear_test_schema()
 
