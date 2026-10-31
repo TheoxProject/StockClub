@@ -14,7 +14,8 @@ from sqlalchemy import or_
 from . import bp
 from ..admin.decorators import admin_required
 from ..extensions import db
-from ..models import Borrowing, BorrowingEvent, Category, Item, StockMovement, utcnow
+from ..models import BoxContent, BoxEvent, Borrowing, BorrowingEvent, Category, Item, StockMovement, StorageBox, utcnow
+from ..box_operations import available, content, get_box, sources_for
 from ..storage import InvalidImage, PhotoStorageError, delete_unreferenced_photo, save_photo
 from ..transactions import synchronized
 
@@ -137,7 +138,15 @@ def _render_inventory_results(items, outstanding_by_item, *, search, selected_ca
         items=items,
         outstanding_by_item=outstanding_by_item,
         has_filters=has_filters,
+        box_results=_box_search(search),
     )
+
+
+def _box_search(search):
+    if not search:
+        return []
+    pattern = f"%{search}%"
+    return StorageBox.query.filter(StorageBox.is_active.is_(True), or_(StorageBox.name.ilike(pattern), StorageBox.description.ilike(pattern))).order_by(StorageBox.name).all()
 
 
 @bp.get("/")
@@ -190,6 +199,7 @@ def index():
         total_units=total_units,
         total_outstanding=total_outstanding, total_stock=total_stock,
         attention_count=attention_count,
+        box_results=_box_search(search),
     )
 
 
@@ -288,11 +298,14 @@ def item_detail(item_id):
         .order_by(BorrowingEvent.created_at.desc(), BorrowingEvent.id.desc()).limit(30).all()
     )
     outstanding_quantity = sum(loan.remaining_quantity for loan in active_borrowings)
+    sources, distribution, outside_available = sources_for(item)
+    box_events = BoxEvent.query.filter_by(item_id=item.id).order_by(BoxEvent.created_at.desc(), BoxEvent.id.desc()).all()
     return render_template(
         "inventory/item_detail.html", item=item, conditions=CONDITIONS,
         active_borrowings=active_borrowings,
         outstanding_quantity=outstanding_quantity,
-        recent_loan_events=recent_loan_events,
+        recent_loan_events=recent_loan_events, sources=sources, distribution=distribution,
+        outside_available=outside_available, box_events=box_events,
     )
 
 
@@ -399,37 +412,14 @@ def adjust_stock(item_id):
         flash("Le commentaire ne doit pas dépasser 240 caractères.", "error")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
 
-    # The guarded arithmetic update avoids negative stock when two volunteers act at once.
-    updated = Item.query.filter_by(id=item.id).filter(Item.quantity >= amount).update(
-        {Item.quantity: Item.quantity - amount, Item.updated_by_id: current_user.id, Item.updated_at: utcnow()},
-        synchronize_session=False,
-    )
-    if updated != 1:
+    try:
+        source = get_box(request.form.get("source_box_id", "").strip())
+        from ..box_operations import checkout
+        checkout(item, source, amount, current_user, note=note)
+    except ValueError as exc:
         db.session.rollback()
-        flash("La quantité disponible est insuffisante ou le stock vient de changer. Recharge la page puis réessaie.", "error")
+        flash(str(exc), "error")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
-
-    db.session.refresh(item)
-    borrowing = Borrowing(
-        item=item,
-        item_name_snapshot=item.name,
-        user=current_user,
-        quantity_out=amount,
-        quantity_returned=0,
-        note=note,
-    )
-    db.session.add(borrowing)
-    db.session.flush()
-    db.session.add(BorrowingEvent(
-        borrowing=borrowing, item=item, item_name_snapshot=item.name,
-        user=current_user, event_type="sortie", quantity=amount, note=note,
-    ))
-    movement_note = f"Emprunt · {note}" if note else "Emprunt"
-    db.session.add(StockMovement(
-        item=item, item_name_snapshot=item.name, user=current_user,
-        delta=-amount, quantity_after=item.quantity, note=movement_note,
-        movement_type="emprunt", total_delta=0, borrowing_id=borrowing.id,
-    ))
     db.session.commit()
     flash(f"Sortie enregistrée : {amount} unité{'s' if amount > 1 else ''}. Il reste {item.quantity} unité{'s' if item.quantity > 1 else ''} disponible{'s' if item.quantity > 1 else ''}.", "success")
     return redirect(url_for("inventory.item_detail", item_id=item.id))
@@ -465,23 +455,13 @@ def return_loan(loan_id):
         flash("Le retour dépasserait la limite de 1 000 000 unités disponibles.", "error")
         return redirect(url_for("inventory.loans"))
 
-    item.quantity += amount
-    item.updated_by = current_user
-    item.updated_at = utcnow()
-    loan.quantity_returned += amount
-    if loan.remaining_quantity == 0:
-        loan.closed_at = utcnow()
-
-    db.session.add(BorrowingEvent(
-        borrowing=loan, item=item, item_name_snapshot=loan.item_name_snapshot,
-        user=current_user, event_type="retour", quantity=amount, note=note,
-    ))
-    movement_note = f"Retour · {note}" if note else "Retour d’emprunt"
-    db.session.add(StockMovement(
-        item=item, item_name_snapshot=loan.item_name_snapshot, user=current_user,
-        delta=amount, quantity_after=item.quantity, note=movement_note,
-        movement_type="retour", total_delta=0, borrowing_id=loan.id,
-    ))
+    try:
+        from ..box_operations import return_loan as apply_return
+        apply_return(loan, amount, current_user, note)
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("inventory.loans"))
     db.session.commit()
     if loan.remaining_quantity == 0 and not loan.quantity_lost:
         flash(f"Retour complet enregistré pour « {loan.item_name_snapshot} ».", "success")
@@ -520,6 +500,7 @@ def stock_adjustment(item_id):
     reasons = ADJUSTMENT_REASONS.get(operation, [])
     outstanding_quantity = _item_outstanding(item.id)
     total_quantity = item.quantity + outstanding_quantity
+    sources, distribution, outside_available = sources_for(item)
     if request.method == "POST":
         try:
             if operation not in ADJUSTMENT_REASONS:
@@ -533,20 +514,23 @@ def stock_adjustment(item_id):
                 raise ValueError("La précision est obligatoire pour « autre » et limitée à 240 caractères.")
             if operation == "add" and total_quantity + amount > 1000000:
                 raise ValueError("Le stock total ne peut pas dépasser 1 000 000 unités.")
-            if operation == "remove" and amount > item.quantity:
+            source = get_box(form.get("source_box_id", "").strip()) if operation == "remove" else None
+            if operation == "remove" and amount > available(item, source):
                 raise ValueError("Le retrait dépasse la quantité disponible.")
         except ValueError as exc:
             flash(str(exc), "error")
             return render_template("inventory/stock_adjustment.html", item=item, outstanding_quantity=outstanding_quantity,
-                                   total_quantity=total_quantity, form=form, reasons=reasons), 400
+                                   total_quantity=total_quantity, form=form, reasons=reasons, sources=sources, outside_available=outside_available), 400
         delta = amount if operation == "add" else -amount
+        if operation == "remove" and source:
+            content(item, source).present_quantity -= amount
         item.quantity += delta
         item.updated_by = current_user
         item.updated_at = utcnow()
         db.session.add(StockMovement(item=item, item_name_snapshot=item.name, user=current_user,
                                      delta=delta, quantity_after=item.quantity, total_delta=delta,
                                      movement_type="ajout" if operation == "add" else "retrait",
-                                     reason=reason, note=detail))
+                                     reason=reason, note=detail, box=source, box_name_snapshot=source.name if source else ""))
         try:
             db.session.commit()
         except Exception:
@@ -555,7 +539,7 @@ def stock_adjustment(item_id):
         flash("Ajustement du stock enregistré.", "success")
         return redirect(url_for("inventory.item_detail", item_id=item.id))
     return render_template("inventory/stock_adjustment.html", item=item, outstanding_quantity=outstanding_quantity,
-                           total_quantity=total_quantity, form=form, reasons=reasons)
+                           total_quantity=total_quantity, form=form, reasons=reasons, sources=sources, outside_available=outside_available)
 
 
 @bp.route("/loans/<int:loan_id>/write-off", methods=["GET", "POST"])
@@ -596,7 +580,8 @@ def write_off_loan(loan_id):
                                       user=current_user, event_type=reason, quantity=amount, note=detail))
         db.session.add(StockMovement(item=item, item_name_snapshot=loan.item_name_snapshot, user=current_user,
                                      borrowing_id=loan.id, delta=0, quantity_after=item.quantity,
-                                     movement_type=f"{reason}_emprunt", total_delta=-amount, reason=reason, note=detail))
+                                     movement_type=f"{reason}_emprunt", total_delta=-amount, reason=reason, note=detail,
+                                     box_id=loan.box_id, box_name_snapshot=loan.box_name_snapshot))
         try:
             db.session.commit()
         except Exception:
@@ -640,6 +625,8 @@ def delete_item(item_id):
         or_(BorrowingEvent.item_name_snapshot.is_(None), BorrowingEvent.item_name_snapshot == "")
     ).update({BorrowingEvent.item_name_snapshot: item_name}, synchronize_session=False)
 
+    BoxContent.query.filter_by(item_id=item.id).delete(synchronize_session=False)
+    BoxEvent.query.filter_by(item_id=item.id).update({BoxEvent.item_id: None}, synchronize_session=False)
     db.session.delete(item)
     db.session.commit()
 
@@ -810,7 +797,7 @@ def _csv_safe(value):
 def export_csv():
     output = io.StringIO(newline="")
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Nom", "Cat\u00e9gorie", "Description", "Disponible", "Unit\u00e9", "Emplacement", "\u00c9tat", "Modifi\u00e9 le", "Stock total", "Sorti"])
+    writer.writerow(["Nom", "Cat\u00e9gorie", "Description", "Disponible", "Unit\u00e9", "Emplacement", "\u00c9tat", "Modifi\u00e9 le", "Stock total", "Sorti", "Disponible hors boîte", "Répartition des boîtes"])
     outstanding = _outstanding_subquery()
     quantities = dict(db.session.query(outstanding.c.item_id, outstanding.c.outstanding_quantity).all())
     for item in Item.query.join(Category).order_by(Item.name).all():
@@ -819,6 +806,7 @@ def export_csv():
             item.quantity, _csv_safe(item.unit), _csv_safe(item.location), _csv_safe(item.condition),
             item.updated_at.isoformat() if item.updated_at else "",
             item.quantity + int(quantities.get(item.id, 0)), int(quantities.get(item.id, 0)),
+            available(item, None), _csv_safe(" | ".join(f"{row['box'].name}: {row['present']} présent(s), {row['outstanding']} sorti(s)" for row in sources_for(item)[1])),
         ])
     response = make_response("\ufeff" + output.getvalue())
     response.headers["Content-Type"] = "text/csv; charset=utf-8"

@@ -1,7 +1,7 @@
 """Deployment checks on empty/current-head fictitious databases only.
 
 Run with tools/run_isolated_tests.py, never against an existing application DB.
-The real populated 0005 upgrade is covered by test_v3_stock_migration.py.
+The populated 0005/0006 upgrades are covered by the V3 migration tests.
 """
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -46,7 +46,7 @@ def test_existing_render_migration_and_entrypoint(tmp_path, populated, monkeypat
     try:
         with app.app_context():
             upgrade(directory=str(ROOT / "migrations"))
-            assert db.session.execute(db.text("SELECT version_num FROM alembic_version")).scalar_one() == "0006_stock_adjustments"
+            assert db.session.execute(db.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007_stock_boxes"
             assert db.session.execute(db.text("SELECT COUNT(*) FROM bootstrap_locks WHERE id=1")).scalar_one() == 1
             if populated:
                 user = User(name="Fictitious previous admin", login="previous-admin", role="admin")
@@ -101,7 +101,7 @@ def test_existing_render_migration_and_entrypoint(tmp_path, populated, monkeypat
         health = entry.app.test_cli_runner().invoke(args=["healthcheck"])
         assert health.exit_code == 0, health.output
         assert "OK" in health.output
-        print(f"DEPLOYMENT {parsed.get_backend_name()} populated={populated}: head 0006 preserved, run:app loaded, health 200, CLI OK; S3 not contacted")
+        print(f"DEPLOYMENT {parsed.get_backend_name()} populated={populated}: head 0007 preserved, run:app loaded, health 200, CLI OK; S3 not contacted")
     finally:
         clear_test_schema()
 

@@ -1,4 +1,5 @@
-<div class="section-title-row"><div><h2>Le matériel</h2><span class="muted small" id="result-count">{{ items|length }} résultat{% if items|length > 1 %}s{% endif %}</span></div><a class="text-link desktop-export" href="{{ url_for('inventory.export_csv') }}">Exporter la liste ↗</a></div>
+{% set result_total = items|length + box_results|default([])|length %}
+<div class="section-title-row"><div><h2>Le matériel</h2><span class="muted small" id="result-count">{{ result_total }} résultat{% if result_total > 1 %}s{% endif %}</span></div><a class="text-link desktop-export" href="{{ url_for('inventory.export_csv') }}">Exporter la liste ↗</a></div>
 <div class="item-grid">
   {% for item in items %}
     {% set out_quantity = outstanding_by_item.get(item.id, 0) %}
@@ -8,6 +9,7 @@
         <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
       </div>
       <div class="item-card-body">
+        <span class="eyebrow">Objet</span>
         <span class="category-path">{{ item.category.full_path }}</span>
         <h3>{{ item.name }}</h3>
         <p class="item-description">{{ item.description or 'Aucune description renseignée.' }}</p>
@@ -16,7 +18,9 @@
         {% if item.location %}<span class="item-location">⌖ {{ item.location }}</span>{% endif %}
       </div>
     </a>
-  {% else %}
-    <div class="empty-state inventory-empty"><span class="empty-icon" aria-hidden="true">▦</span><h3>{% if has_filters %}Aucun résultat{% else %}L’inventaire est encore vide{% endif %}</h3><p>{% if has_filters %}Essaie de modifier ta recherche ou tes filtres.{% else %}Ajoute le premier objet pour commencer à recenser le matériel du club.{% endif %}</p>{% if not has_filters %}<a class="button button-primary" href="{{ url_for('inventory.create_item') }}">Ajouter le premier objet</a>{% endif %}</div>
   {% endfor %}
+  {% for box in box_results|default([]) %}<a class="panel box-card" href="{{ url_for('boxes.detail', box_id=box.id) }}"><span class="eyebrow">Boîte</span><h3>{{ box.name }}</h3><p>{{ box.description or 'Regroupement physique de matériel' }}</p><span class="text-link">Voir la boîte ↗</span></a>{% endfor %}
+  {% if result_total == 0 %}
+    <div class="empty-state inventory-empty"><span class="empty-icon" aria-hidden="true">▦</span><h3>{% if has_filters %}Aucun résultat{% else %}L’inventaire est encore vide{% endif %}</h3><p>{% if has_filters %}Essaie de modifier ta recherche ou tes filtres.{% else %}Ajoute le premier objet pour commencer à recenser le matériel du club.{% endif %}</p>{% if not has_filters %}<a class="button button-primary" href="{{ url_for('inventory.create_item') }}">Ajouter le premier objet</a>{% endif %}</div>
+  {% endif %}
 </div>

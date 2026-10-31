@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "inventory/_stock_macros.html" import stock_balances, movement_history, loan_events, loan_accounting with context %}
+{% from "boxes/_macros.html" import transfer_history with context %}
 {% block title %}{{ item.name }}{% endblock %}
 {% block content %}
 <div class="detail-page">
@@ -24,6 +25,9 @@
       <form class="stock-adjust-form" action="{{ url_for('inventory.adjust_stock', item_id=item.id) }}" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="movement_type" value="emprunt">
+        {% set borrow_sources = sources|selectattr('available', 'gt', 0)|list %}
+        <label for="borrow-source">Provenance de la sortie</label><select id="borrow-source" name="source_box_id">{% for source in sources %}<option value="{{ source.id }}" data-available="{{ source.available }}" {% if source.available == 0 %}disabled{% endif %}{% if borrow_sources and source.id == borrow_sources[0].id %} selected{% endif %}>{{ source.name }} · {{ source.available }} présent(s) disponible(s)</option>{% endfor %}</select>
+        <p class="field-hint">Un emprunt prélève une seule provenance. Les quantités présentes sont vérifiées à l’enregistrement ; le retour rejoindra cette provenance.</p>
         <label for="quantity">Quantité à sortir du stock</label>
         <div class="quantity-controls"><button type="button" class="quantity-step" data-step="-1" aria-label="Diminuer la quantité">−</button><input id="quantity" name="quantity" type="number" inputmode="numeric" min="1" max="100000" step="1" value="1" required><button type="button" class="quantity-step" data-step="1" aria-label="Augmenter la quantité">＋</button></div>
         <label for="note">Commentaire (facultatif)</label><input id="note" name="note" type="text" maxlength="240" placeholder="Ex. matériel pour entraînement">
@@ -36,6 +40,9 @@
       {% if item.movements %}{{ movement_history(item.movements[:20]) }}{% else %}<p class="muted">Aucun mouvement enregistré.</p>{% endif %}
     </article>
   </section>
+
+  <section class="panel box-section"><h2>Répartition dans les boîtes</h2><p><strong>{{ outside_available }}</strong> disponibles hors boîte · <strong>{{ active_borrowings|selectattr('box_id', 'none')|sum(attribute='remaining_quantity') }}</strong> sortis hors boîte.</p><ul class="box-distribution">{% for row in distribution %}<li><a href="{{ url_for('boxes.detail', box_id=row.box.id) }}">{{ row.box.name }}</a> : <strong>{{ row.present }}</strong> présents · <strong>{{ row.outstanding }}</strong> sortis · {{ row.assigned }} affectés</li>{% else %}<li>Aucune quantité affectée à une boîte.</li>{% endfor %}</ul></section>
+  <section class="panel box-section"><h2>Historique de répartition</h2>{{ transfer_history(box_events) }}</section>
 
   <section class="inventory-section detail-loan-section">
     <div class="section-title-row"><div><h2>Sorties en cours pour cet objet</h2><span class="muted small">Les retours sont enregistrés depuis la page Matériel sorti.</span></div></div>
@@ -62,9 +69,9 @@
   </section>
 
   <section class="item-delete-panel">
-    <div><h2>Supprimer l’objet</h2><p>La fiche et sa photo seront supprimées. L’historique des mouvements et emprunts restera conservé.</p></div>
+    <div><h2>Supprimer l’objet</h2><p>La fiche et sa photo seront supprimées. L’historique des mouvements et emprunts restera conservé.</p>{% if distribution %}<p>Les affectations suivantes seront retirées : {% for row in distribution %}{{ row.box.name }} ({{ row.present }} présents, {{ row.outstanding }} sortis){{ ', ' if not loop.last else '.' }}{% endfor %}</p>{% endif %}</div>
     {% if current_user.is_admin %}
-      <form method="post" action="{{ url_for('inventory.delete_item', item_id=item.id) }}" onsubmit="return confirm('Supprimer définitivement cet objet ? L’historique sera conservé, mais cette action ne peut pas être annulée.');">
+      <form method="post" action="{{ url_for('inventory.delete_item', item_id=item.id) }}" onsubmit="return confirm('Supprimer définitivement cet objet ? Ses affectations aux boîtes seront retirées. L’historique sera conservé, mais cette action ne peut pas être annulée.');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="button button-danger" {% if outstanding_quantity > 0 %}disabled title="Des unités sont encore à l’extérieur"{% endif %}><span aria-hidden="true">⌫</span> Supprimer l’objet</button>
         {% if outstanding_quantity > 0 %}<span class="admin-only-hint">Régler les {{ outstanding_quantity }} unité(s) encore sorties avant suppression.</span>{% endif %}

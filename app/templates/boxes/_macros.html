@@ -1,0 +1,9 @@
+{% macro provenance(loan) %}
+<span class="provenance">Provenance : {% if loan.box_id %}<a href="{{ url_for('boxes.detail', box_id=loan.box_id) }}">{{ loan.box_name_snapshot }}</a>{% else %}Hors boîte{% endif %}{% if loan.group_id %} · Sortie groupée n° {{ loan.group_id }}{% endif %}</span>
+{% endmacro %}
+
+{% macro transfer_history(events) %}
+{% for event in events %}
+<div class="loan-event-row"><span class="movement-sign">↔ {{ event.quantity }}</span><div class="movement-content"><strong>{{ event.item_name_snapshot }}</strong><span>{% if event.source_box_id %}<a href="{{ url_for('boxes.detail', box_id=event.source_box_id) }}">{{ event.source_name_snapshot }}</a>{% else %}{{ event.source_name_snapshot or 'Hors boîte' }}{% endif %} → {% if event.destination_box_id %}<a href="{{ url_for('boxes.detail', box_id=event.destination_box_id) }}">{{ event.destination_name_snapshot }}</a>{% else %}{{ event.destination_name_snapshot or 'Hors boîte' }}{% endif %}</span><span>{{ event.user.name if event.user else 'Compte supprimé' }} · {{ event.created_at|localdatetime }}</span></div></div>
+{% else %}<p class="muted">Aucun changement de composition enregistré.</p>{% endfor %}
+{% endmacro %}

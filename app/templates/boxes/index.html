@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Boîtes{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">RANGEMENT PHYSIQUE</span><h1>Boîtes</h1><p class="muted">Retrouve le matériel présent et les emprunts de chaque boîte.</p></div>{% if current_user.is_admin %}<a class="button button-primary" href="{{ url_for('boxes.create') }}">Créer une boîte</a>{% endif %}</section>
+<form method="get" class="filter-panel" role="search"><label class="search-input"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search|default(request.args.get('q', '')) }}" placeholder="Rechercher une boîte" aria-label="Rechercher une boîte"></label><button class="button button-secondary" type="submit">Rechercher</button></form>
+<div class="box-grid">
+{% for box in boxes %}<a class="panel box-card" href="{{ url_for('boxes.detail', box_id=box.id) }}"><span class="eyebrow">Boîte</span><h2>{{ box.name }}</h2><p>{{ box.description or 'Aucune description renseignée.' }}</p><span class="text-link">Voir le contenu ↗</span></a>{% else %}<div class="empty-state"><h2>Aucune boîte trouvée</h2><p>Les boîtes regroupent des quantités de matériel existant, sans créer de stock.</p></div>{% endfor %}
+</div>
+{% endblock %}

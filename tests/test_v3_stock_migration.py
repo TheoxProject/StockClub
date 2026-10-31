@@ -61,7 +61,7 @@ def test_migration_fresh_and_populated_0005_preserves_legacy_and_enables_operati
         db.session.remove()
         upgrade(revision="head")
         assert sql_snapshot() == before
-        assert db.session.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0006_stock_adjustments"
+        assert db.session.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007_stock_boxes"
         if populated:
             loan = db.session.get(Borrowing, 1)
             assert loan.quantity_lost == 0 and loan.remaining_quantity == 3
@@ -84,8 +84,11 @@ def test_migration_fresh_and_populated_0005_preserves_legacy_and_enables_operati
             with pytest.raises(RuntimeError, match="historique"):
                 command.downgrade(app.extensions["migrate"].migrate.get_config(), "0005_admin_bootstrap")
             db.session.remove()
-            assert db.session.get(Borrowing, 1).quantity_lost == 1
-            assert StockMovement.query.count() == 5
+            # A later revision may already have downgraded before the 0006
+            # history guard refuses 0005. Inspect the surviving 0006 fields
+            # directly instead of asking the current ORM for newer columns.
+            assert db.session.execute(sa.text("SELECT quantity_lost FROM borrowings WHERE id = 1")).scalar_one() == 1
+            assert db.session.execute(sa.text("SELECT COUNT(*) FROM stock_movements")).scalar_one() == 5
     else:
         with app.app_context():
             downgrade(revision="0005_admin_bootstrap")

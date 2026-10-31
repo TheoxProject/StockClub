@@ -1,0 +1,11 @@
+.box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:20px 0}
+.box-card{min-width:0;overflow-wrap:anywhere}.box-card h2{margin:8px 0}.box-card p{color:var(--muted)}
+.box-actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}.box-actions .button{white-space:normal;text-align:center}
+.box-section{margin-top:20px}.box-table{width:100%;border-collapse:collapse;text-align:left}.box-table th,.box-table td{padding:12px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.table-scroll{overflow-x:auto}.box-table th:first-child{width:55%}.box-table td{font-variant-numeric:tabular-nums}
+.group-line{min-width:0;margin:18px 0;padding:16px;border:1px solid var(--line);border-radius:12px}.group-line legend{font-weight:700;overflow-wrap:anywhere}.group-line p{font-size:13px;color:var(--muted)}
+.group-line-controls{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.group-line-controls input[type=number]{width:110px;min-height:44px}.group-line-controls input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:8px}.group-line-controls label{min-height:44px;display:flex;align-items:center}
+.box-open-loan{padding:14px 0;border-bottom:1px solid var(--line)}.box-open-loan h3{margin:0}.provenance{display:block;font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:var(--muted)}
+.movement-content .loan-accounting strong{display:inline;font-size:inherit}
+.box-distribution li{margin:8px 0;overflow-wrap:anywhere}.box-history-empty{padding:12px 0}.stack-form select{min-width:0;max-width:100%;min-height:44px}
+@media(max-width:760px){.mobile-nav{grid-template-columns:repeat(5,minmax(0,1fr))}.mobile-nav-admin{grid-template-columns:repeat(6,minmax(0,1fr))}.mobile-nav a{font-size:8px;padding:8px 2px}.desktop-nav{flex-wrap:wrap}.box-grid{grid-template-columns:1fr}.box-table th,.box-table td{padding:10px 4px;font-size:12px}.box-table th:first-child{width:46%}.group-line{padding:12px}.group-line-controls{align-items:flex-start}.group-line-controls>label:first-child{width:100%}.box-actions .button{flex:1;min-height:44px}.provenance{font-size:11px}}

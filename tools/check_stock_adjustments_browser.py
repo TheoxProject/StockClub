@@ -211,10 +211,10 @@ try:
         csv_response=admin_context.request.get(origin+"/items.csv")
         assert csv_response.status==200
         rows=list(csv.reader(StringIO(csv_response.body().decode("utf-8-sig")),delimiter=";"))
-        assert rows[0][3]=="Disponible" and rows[0][-2:]==["Stock total","Sorti"]
+        assert rows[0][3]=="Disponible" and rows[0][8:10]==["Stock total","Sorti"]
         by_name={row[0]:row for row in rows[1:]}
         assert by_name["Cônes disponibles fictifs"][3]=="2"
-        assert by_name["Cônes empruntés fictifs"][-2:]==["8","0"]
+        assert by_name["Cônes empruntés fictifs"][8:10]==["8","0"]
         admin_page.set_viewport_size({"width":1280,"height":900})
         admin_page.goto(origin+f"/items/{b_id}")
         balances(admin_page,(8,8,0))

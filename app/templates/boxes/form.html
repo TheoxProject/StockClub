@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Modifier la boîte' if box else 'Créer une boîte' }}{% endblock %}
+{% block content %}
+<div class="form-page"><a class="back-link" href="{{ url_for('boxes.detail', box_id=box.id) if box else url_for('boxes.index') }}">← Retour</a><div class="form-intro"><h1>{{ 'Modifier la boîte' if box else 'Créer une boîte' }}</h1><p>Une boîte regroupe du matériel existant. Pour suivre la caisse physique, ajoute un objet ordinaire à son contenu.</p></div>
+<form method="post" class="form-card stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="field"><label for="name">Nom</label><input id="name" name="name" maxlength="160" required value="{{ form.get('name', box.name if box else '') }}"><p class="field-hint">Nom unique, indépendamment des majuscules et espaces superflus.</p></div><div class="field"><label for="description">Description (facultatif)</label><textarea id="description" name="description" maxlength="5000" rows="4">{{ form.get('description', box.description if box else '') }}</textarea></div><div class="form-actions"><a class="button button-quiet" href="{{ url_for('boxes.detail', box_id=box.id) if box else url_for('boxes.index') }}">Annuler</a><button class="button button-primary" type="submit">Enregistrer la boîte</button></div></form></div>
+{% endblock %}

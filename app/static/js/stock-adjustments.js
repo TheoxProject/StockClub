@@ -5,6 +5,7 @@
   const operation = form.elements.operation;
   const reason = form.elements.reason;
   const detail = form.elements.detail;
+  const source = form.elements.source_box_id;
   const available = Number(form.dataset.available);
   const outstanding = Number(form.dataset.outstanding);
   const remaining = Number(form.dataset.remaining || 0);
@@ -13,6 +14,11 @@
   const error = preview.querySelector('[data-preview-error]');
   function update() {
     const kind = operation ? operation.value : 'write-off';
+    if (source) {
+      source.disabled = kind !== 'remove';
+      form.querySelector('[data-source-field]').hidden = kind !== 'remove';
+      form.querySelector('[data-add-destination]').hidden = kind === 'remove';
+    }
     if (operation) {
       for (const option of reason.options) {
         if (!option.dataset.operations) continue;
@@ -36,6 +42,7 @@
     } else if (kind === 'remove') {
       afterAvailable -= amount;
       if (afterAvailable < 0) warning = 'Le retrait dépasse le disponible.';
+      else if (source && amount > Number(source.selectedOptions[0]?.dataset.available || 0)) warning = 'Le retrait dépasse le présent à cette provenance.';
     } else {
       afterOut -= amount;
       if (amount > remaining) warning = 'La déclaration dépasse le restant à rendre sur cet emprunt.';

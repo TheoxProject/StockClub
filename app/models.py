@@ -166,6 +166,10 @@ class StockMovement(db.Model):
     note = db.Column(db.String(240), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
+    box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="SET NULL"), nullable=True)
+    box_name_snapshot = db.Column(db.String(160), nullable=False, default="", server_default="")
+    box = db.relationship("StorageBox")
+
     item = db.relationship("Item", back_populates="movements")
     user = db.relationship("User")
 
@@ -193,6 +197,12 @@ class Borrowing(db.Model):
     note = db.Column(db.String(240), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     closed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="SET NULL"), nullable=True, index=True)
+    box_name_snapshot = db.Column(db.String(160), nullable=False, default="", server_default="")
+    group_id = db.Column(db.Integer, db.ForeignKey("loan_groups.id", ondelete="SET NULL"), nullable=True, index=True)
+    box = db.relationship("StorageBox")
+    group = db.relationship("LoanGroup", back_populates="borrowings")
 
     item = db.relationship("Item", back_populates="borrowings")
     user = db.relationship("User")
@@ -241,3 +251,57 @@ class Invitation(db.Model):
     revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+class StorageBox(db.Model):
+    __tablename__ = "storage_boxes"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    name_key = db.Column(db.String(320), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=False, default="", server_default="")
+    is_active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    contents = db.relationship("BoxContent", back_populates="box", cascade="all, delete-orphan")
+
+
+class BoxContent(db.Model):
+    __tablename__ = "box_contents"
+    __table_args__ = (db.UniqueConstraint("box_id", "item_id", name="uq_box_contents_box_item"),
+                      CheckConstraint("present_quantity >= 0", name="ck_box_contents_present_nonnegative"))
+    id = db.Column(db.Integer, primary_key=True)
+    box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    present_quantity = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    box = db.relationship("StorageBox", back_populates="contents")
+    item = db.relationship("Item")
+
+
+class LoanGroup(db.Model):
+    __tablename__ = "loan_groups"
+    id = db.Column(db.Integer, primary_key=True)
+    box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="SET NULL"), nullable=True, index=True)
+    box_name_snapshot = db.Column(db.String(160), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    box = db.relationship("StorageBox")
+    user = db.relationship("User")
+    borrowings = db.relationship("Borrowing", back_populates="group")
+
+
+class BoxEvent(db.Model):
+    __tablename__ = "box_events"
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_name_snapshot = db.Column(db.String(160), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    source_box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="SET NULL"), nullable=True)
+    destination_box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="SET NULL"), nullable=True)
+    source_name_snapshot = db.Column(db.String(160), nullable=False)
+    destination_name_snapshot = db.Column(db.String(160), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    user = db.relationship("User")
+
+BoxEvent.item = db.relationship("Item")
+BoxEvent.source_box = db.relationship("StorageBox", foreign_keys=[BoxEvent.source_box_id])
+BoxEvent.destination_box = db.relationship("StorageBox", foreign_keys=[BoxEvent.destination_box_id])

@@ -20,7 +20,7 @@
 
 <section class="inventory-section">
   <form id="inventory-filters" class="filter-panel" method="get" action="{{ url_for('inventory.index') }}">
-    <label class="search-input"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search }}" placeholder="Rechercher un objet, une catégorie…" aria-label="Rechercher" autocomplete="off" spellcheck="false"></label>
+    <label class="search-input"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search }}" placeholder="Rechercher un objet, une boîte, une catégorie…" aria-label="Rechercher" autocomplete="off" spellcheck="false"></label>
     <select name="category" aria-label="Filtrer par catégorie">
       <option value="">Toutes les catégories</option>
       {% for category, label in categories %}<option value="{{ category.id }}" {% if selected_category and selected_category.id == category.id %}selected{% endif %}>{{ label }}</option>{% endfor %}
