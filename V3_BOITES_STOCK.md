@@ -1,5 +1,7 @@
 # V3 — boîtes physiques et mouvements groupés
 
+Le parcours de création/remplissage est ensuite amélioré dans [Remplissage visuel des boîtes](V3_REMPLISSAGE_BOITES.md), avec la migration technique `0008_box_fill_receipts`. Le présent document conserve les choix et preuves de la livraison initiale des boîtes.
+
 Livraison locale du 31 octobre 2026, destinée à la revue et aux essais avant publication. Aucun accès à la production, aucune opération réseau Git ni déploiement. Les ajustements et pertes/casses V3 restent disponibles.
 
 ## Modèle et invariants

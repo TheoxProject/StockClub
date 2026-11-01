@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Ajouter du matériel · {{ box.name }}{% endblock %}
+{% block content %}
+<div class="fill-workspace" data-box-fill data-options-url="{{ url_for('boxes.material_options', box_id=box.id) }}">
+  <a class="back-link" href="{{ url_for('boxes.detail', box_id=box.id) }}">← Retour à la boîte</a>
+  <section class="form-intro"><span class="eyebrow">REMPLIR UNE BOÎTE</span><h1>Ajouter du matériel</h1><p>Destination : <strong>{{ box.name }}</strong></p><p class="muted">Choisis des quantités disponibles hors boîte. Elles s’ajoutent au contenu déjà présent, sans modifier les emprunts.</p></section>
+  <div class="flash flash-error" data-fill-error role="alert" {% if not global_error %}hidden{% endif %}>{{ global_error or '' }}</div>
+  <noscript><p class="flash flash-error">Active JavaScript pour sélectionner plusieurs objets et conserver tes choix entre les recherches.</p></noscript>
+  <div data-results-view>
+    <form class="filter-panel" data-fill-filters role="search" action="{{ url_for('boxes.add_material', box_id=box.id) }}" method="get">
+      <label class="search-input"><span aria-hidden="true">⌕</span><input type="search" data-fill-search name="q" placeholder="Rechercher un objet par son nom" aria-label="Rechercher un objet par son nom" autocomplete="off"></label>
+      <label class="fill-category"><span>Catégorie et sous-catégories</span><select name="category" data-fill-category><option value="">Toutes les catégories</option>{% for category, label in categories %}<option value="{{ category.id }}">{{ label }}</option>{% endfor %}</select></label>
+      <button class="button button-secondary" type="submit">Rechercher</button>
+    </form>
+    <div class="box-actions"><button type="button" class="button button-secondary" data-select-visible disabled>Sélectionner les résultats affichés</button><button type="button" class="button button-quiet" data-refresh-results>Actualiser les résultats</button></div>
+    <p data-fill-status role="status" aria-live="polite">Chargement du matériel disponible…</p>
+    <div data-fill-results aria-busy="true" class="fill-results"></div>
+    <nav class="fill-pagination" aria-label="Pages des objets disponibles"><button type="button" class="button button-secondary" data-page-previous disabled>Page précédente</button><span data-fill-page>Page 1</span><button type="button" class="button button-secondary" data-page-next disabled>Page suivante</button></nav>
+  </div>
+  <section data-selection-view hidden><h2 tabindex="-1" data-selection-heading>La sélection complète</h2><p>Ces quantités seront ajoutées à la boîte, y compris pour les objets masqués par les filtres. Une quantité incorrecte doit être corrigée ou retirée.</p><button type="button" class="button button-secondary" data-back-results>Retour aux résultats</button><div data-fill-summary class="fill-results"></div></section>
+  <form method="post" action="{{ url_for('boxes.add_material', box_id=box.id) }}" data-fill-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="request_token" value="{{ request_token }}">
+    <div class="fill-bar" data-fill-bar>
+      <p class="fill-totals" aria-live="polite"><strong data-fill-count>0</strong> références sélectionnées · <strong data-fill-units>0</strong> unités<span data-fill-invalid hidden> · Quantités à corriger</span></p>
+      <div class="fill-bar-actions"><button type="button" class="button button-quiet" data-clear-selection disabled>Vider la sélection</button><button type="button" class="button button-secondary" data-show-selection disabled>Voir la sélection</button><button type="submit" class="button button-primary" data-fill-submit disabled>Ajouter à la boîte</button></div>
+    </div>
+  </form>
+  <script type="application/json" data-initial-selection>{{ initial_selection|tojson }}</script>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/box-fill.js', v='3.1') }}"></script>{% endblock %}

@@ -305,3 +305,15 @@ class BoxEvent(db.Model):
 BoxEvent.item = db.relationship("Item")
 BoxEvent.source_box = db.relationship("StorageBox", foreign_keys=[BoxEvent.source_box_id])
 BoxEvent.destination_box = db.relationship("StorageBox", foreign_keys=[BoxEvent.destination_box_id])
+
+
+class BoxFillReceipt(db.Model):
+    """Durable idempotency record committed with a grouped box fill."""
+    __tablename__ = "box_fill_receipts"
+    id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="RESTRICT"), nullable=False)
+    payload_hash = db.Column(db.String(64), nullable=False)
+    reference_count = db.Column(db.Integer, nullable=False)
+    unit_count = db.Column(db.BigInteger, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)

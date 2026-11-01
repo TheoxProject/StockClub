@@ -61,7 +61,7 @@ def test_migration_fresh_and_populated_0005_preserves_legacy_and_enables_operati
         db.session.remove()
         upgrade(revision="head")
         assert sql_snapshot() == before
-        assert db.session.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007_stock_boxes"
+        assert db.session.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008_box_fill_receipts"
         if populated:
             loan = db.session.get(Borrowing, 1)
             assert loan.quantity_lost == 0 and loan.remaining_quantity == 3

@@ -112,7 +112,7 @@ def main():
             login("box-admin")
             page.goto(origin + "/boxes/new")
             page.locator("#name").fill("Arrivée fictive")
-            page.get_by_role("button", name="Enregistrer la boîte", exact=True).click()
+            page.get_by_role("button", name="Créer une boîte vide", exact=True).click()
             box_id = int(re.search(r"/boxes/(\d+)$", page.url).group(1))
             box_url = origin + f"/boxes/{box_id}"
             for item_id, quantity in zip(item_ids, (4, 3)):
