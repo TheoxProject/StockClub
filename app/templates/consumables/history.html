@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Historique des consommables{% endblock %}
+{% block content %}
+<div class="form-page">
+  <a class="back-link" href="{{ url_for('inventory.index') }}">← Retour à l’inventaire</a>
+  <section class="form-intro"><h1>Historique des consommables</h1><p>Les 100 dernières opérations de consommation, annulation et réapprovisionnement.</p></section>
+  {% for date, ident, kind, entry in rows %}
+  <article class="form-card">
+    {% if kind == 'replenishment' %}
+      <h2>Réapprovisionnement · {{ entry.item_name_snapshot }}</h2>
+      <p>{{ entry.total_delta }} unité(s) · destination : Hors boîte</p>
+    {% else %}
+      <h2>{% if entry.kind == 'direct' %}Consommation depuis le disponible{% elif entry.kind == 'loan' %}Consommation sur emprunt{% else %}Annulation de consommation n° {{ entry.original_id }}{% endif %} · {{ entry.item_name_snapshot }}</h2>
+      <p>{{ entry.quantity }} unité(s) · {% if entry.kind == 'cancellation' and entry.original and entry.original.kind == 'direct' and entry.restored_outside %}Provenance d’origine : {{ entry.original.box_name_snapshot }} · restitution : Hors boîte{% else %}Provenance : {{ entry.box_name_snapshot or 'Hors boîte' }}{% endif %}</p>
+      {% if entry.kind in ('direct', 'loan') %}
+        {% if entry.cancellation %}<p>Annulée par l’opération n° {{ entry.cancellation.id }} · motif : {{ entry.cancellation.note }}</p>
+        {% elif current_user.is_admin %}<p><a href="{{ url_for('consumables.cancel', consumption_id=entry.id) }}">Annuler cette consommation</a></p>{% endif %}
+      {% endif %}
+    {% endif %}
+    <p>{{ date|localdatetime }} · {{ entry.user.name if entry.user else 'Compte supprimé' }}{% if entry.note %} · {{ entry.note }}{% endif %}</p>
+    <p>Opération n° {{ ident }}</p>
+  </article>
+  {% else %}<p>Aucune opération enregistrée.</p>{% endfor %}
+</div>
+{% endblock %}

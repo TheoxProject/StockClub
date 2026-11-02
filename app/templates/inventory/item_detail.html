@@ -11,6 +11,8 @@
       <span class="category-path">{{ item.category.full_path }}</span>
       <h1>{{ item.name }}</h1>
       <span class="condition-pill condition-{{ item.condition_css }}">{{ item.condition }}</span>
+      {% if item.is_consumable %}<p><strong>Consommable</strong> · Quantités entières dans l’unité de cette fiche ({{ item.unit }}), sans conversion.</p>{% endif %}
+      {% for reason in attention_reasons %}<p class="field-hint">{{ reason }}</p>{% endfor %}
       {% if item.description %}<p class="detail-description">{{ item.description }}</p>{% else %}<p class="muted">Aucune description renseignée.</p>{% endif %}
       <div class="detail-actions"><a class="button button-secondary" href="{{ url_for('inventory.edit_item', item_id=item.id) }}">✎ Modifier la fiche</a>{% if current_user.is_admin %}<a class="button button-primary" href="{{ url_for('inventory.stock_adjustment', item_id=item.id) }}">Ajuster le stock</a>{% endif %}<a class="button button-quiet" href="{{ url_for('inventory.categories') }}">Gérer les catégories</a><a class="button button-quiet" href="{{ url_for('inventory.loans') }}">Voir le matériel sorti ↗</a></div>
     </div>
@@ -20,7 +22,8 @@
     <article class="panel stock-panel">
       <div class="panel-heading"><div><span class="eyebrow">MATÉRIEL DÉTENU</span><h2>Quantités</h2></div><span class="stat-icon stat-icon-green" aria-hidden="true">□</span></div>
       {{ stock_balances(item.quantity, outstanding_quantity) }}
-      <p class="field-hint">Stock total = Disponible + Sorti. Le matériel sorti reste à rendre tant qu’aucun retour, perte ou casse n’est enregistré.</p>
+      <p class="field-hint">Stock total = Disponible + Sorti. Le matériel sorti reste à rendre jusqu’à un retour, une consommation, une perte ou une casse.</p>
+      {% if item.is_consumable %}<div class="detail-actions"><a class="button button-primary" href="{{ url_for('consumables.consume_item', item_id=item.id) }}">Consommer</a><a class="button button-secondary" href="{{ url_for('consumables.replenish', item_id=item.id) }}">Réapprovisionner</a></div><p class="field-hint">Consommer prélève le stock disponible à la provenance choisie. Réapprovisionner ajoute du stock hors boîte.</p>{% endif %}
       {% if item.location %}<p class="location-line">⌖ <strong>Emplacement :</strong> {{ item.location }}</p>{% else %}<p class="muted">Aucun emplacement renseigné.</p>{% endif %}
       <form class="stock-adjust-form" action="{{ url_for('inventory.adjust_stock', item_id=item.id) }}" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -43,6 +46,9 @@
 
   <section class="panel box-section"><h2>Répartition dans les boîtes</h2><p><strong>{{ outside_available }}</strong> disponibles hors boîte · <strong>{{ active_borrowings|selectattr('box_id', 'none')|sum(attribute='remaining_quantity') }}</strong> sortis hors boîte.</p><ul class="box-distribution">{% for row in distribution %}<li><a href="{{ url_for('boxes.detail', box_id=row.box.id) }}">{{ row.box.name }}</a> : <strong>{{ row.present }}</strong> présents · <strong>{{ row.outstanding }}</strong> sortis · {{ row.assigned }} affectés</li>{% else %}<li>Aucune quantité affectée à une boîte.</li>{% endfor %}</ul></section>
   <section class="panel box-section"><h2>Historique de répartition</h2>{{ transfer_history(box_events) }}</section>
+  <section class="panel box-section"><h2>Consommations et annulations</h2><a class="text-link" href="{{ url_for('consumables.history') }}">Historique des consommables ↗</a>
+    {% for entry in consumptions %}<article class="box-open-loan"><strong>{{ 'Annulation de consommation' if entry.kind == 'cancellation' else ('Consommation sur emprunt' if entry.kind == 'loan' else 'Consommation depuis le disponible') }} · {{ entry.quantity }} {{ item.unit }}</strong><p>{{ entry.user.name if entry.user else 'Compte supprimé' }} · {{ entry.created_at|localdatetime }} · {% if entry.restored_outside %}Restitution hors boîte (origine : {{ entry.box_name_snapshot }}){% else %}{{ entry.box_name_snapshot or 'Hors boîte' }}{% endif %}{% if entry.borrowing_id %} · Emprunt n° {{ entry.borrowing_id }}{% endif %}</p>{% if entry.note %}<p>{{ entry.note }}</p>{% endif %}{% if entry.kind == 'cancellation' %}<p>Compense la consommation n° {{ entry.original_id }}.</p>{% elif entry.cancellation %}<p>Annulée par l’opération n° {{ entry.cancellation.id }}. L’événement d’origine est conservé.</p>{% elif current_user.is_admin %}<a class="button button-secondary" href="{{ url_for('consumables.cancel', consumption_id=entry.id) }}">Annuler cette consommation</a>{% endif %}</article>{% else %}<p class="muted">Aucune consommation enregistrée pour cet objet.</p>{% endfor %}
+  </section>
 
   <section class="inventory-section detail-loan-section">
     <div class="section-title-row"><div><h2>Sorties en cours pour cet objet</h2><span class="muted small">Les retours sont enregistrés depuis la page Matériel sorti.</span></div></div>
@@ -55,6 +61,7 @@
             <a class="text-link" href="{{ url_for('inventory.loans') }}">Gérer le retour ↗</a>
           </div>
           {{ loan_accounting(loan) }}
+          {% if item.is_consumable %}<p><a class="button button-secondary" href="{{ url_for('consumables.consume_loan', loan_id=loan.id) }}">Consommer</a></p>{% endif %}
           {% if current_user.is_admin %}<p class="write-off-action"><a class="button button-danger" href="{{ url_for('inventory.write_off_loan', loan_id=loan.id) }}">Déclarer une perte ou une casse</a></p>{% endif %}
         {% endfor %}
       </div>
@@ -62,7 +69,7 @@
       <div class="empty-state compact"><h3>Aucune sortie en cours</h3><p>Aucune unité de cet objet n’est enregistrée comme étant à l’extérieur.</p></div>
     {% endif %}
     {% if recent_loan_events %}
-      <div class="panel loan-events loan-history-section"><div class="panel-heading"><div><h2>Historique des sorties et retours, pertes et casses</h2></div><a class="text-link" href="{{ url_for('inventory.loans') }}">Tout voir ↗</a></div>
+      <div class="panel loan-events loan-history-section"><div class="panel-heading"><div><h2>Historique des sorties et retours, consommations, pertes et casses</h2></div><a class="text-link" href="{{ url_for('inventory.loans') }}">Tout voir ↗</a></div>
         {{ loan_events(recent_loan_events) }}
       </div>
     {% endif %}

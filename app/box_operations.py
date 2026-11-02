@@ -37,7 +37,7 @@ def available(item, box):
 
 def distribution_for(item):
     contents = {row.box_id: row for row in BoxContent.query.filter_by(item_id=item.id).all()}
-    loans = Borrowing.query.filter_by(item_id=item.id).filter(Borrowing.box_id.isnot(None), Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).all()
+    loans = Borrowing.query.filter_by(item_id=item.id).filter(Borrowing.box_id.isnot(None), Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed).all()
     outstanding = {}
     for loan in loans:
         outstanding[loan.box_id] = outstanding.get(loan.box_id, 0) + loan.remaining_quantity

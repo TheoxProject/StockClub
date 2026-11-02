@@ -1,0 +1,5 @@
+﻿{% extends "base.html" %}
+{% block title %}Correction de consommation{% endblock %}
+{% block content %}
+<div class="form-page"><a class="back-link" href="{{ url_for('consumables.history') }}">← Historique des consommables</a><section class="form-card"><h1>Correction de consommation</h1><p>{{ entry.item_name_snapshot }} · {{ entry.quantity }} unité(s)</p><p>{{ message }}</p>{% if entry.cancellation %}<p>Motif : {{ entry.cancellation.note }} · opération n° {{ entry.cancellation.id }}</p>{% endif %}</section></div>
+{% endblock %}

@@ -15,7 +15,7 @@
   <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">□</span><div><span class="stat-label">Stock total</span><strong>{{ total_stock }}</strong><small>disponible + sorti</small></div></article>
   <article class="stat-card"><span class="stat-icon stat-icon-green" aria-hidden="true">□</span><div><span class="stat-label">Disponible</span><strong>{{ total_units }}</strong><small>pouvant être emprunté</small></div></article>
   <article class="stat-card"><span class="stat-icon stat-icon-sand" aria-hidden="true">↗</span><div><span class="stat-label">Sorti</span><strong>{{ total_outstanding }}</strong><small>restant à rendre</small></div></article>
-  <article class="stat-card"><span class="stat-icon stat-icon-rose" aria-hidden="true">!</span><div><span class="stat-label">À surveiller</span><strong>{{ attention_count }}</strong><small>références à contrôler ou réparer</small></div></article>
+  <article class="stat-card"><span class="stat-icon stat-icon-rose" aria-hidden="true">!</span><div><a class="stat-label" href="{{ url_for('inventory.index', attention=1) }}">À surveiller</a><strong>{{ attention_count }}</strong><small>état du matériel ou stock de consommables bas</small></div></article>
 </section>
 
 <section class="inventory-section">
@@ -33,6 +33,7 @@
       <option value="empty" {% if availability == 'empty' %}selected{% endif %}>Quantité à zéro</option>
     </select>
     <label class="quantity-filter"><span>Quantité dispo. min.</span><input type="number" name="quantity_min" min="0" max="100000" step="1" value="{{ quantity_min }}" placeholder="0" aria-label="Quantité disponible minimale"></label>
+    <label><input type="checkbox" name="attention" value="1" {% if attention_only %}checked{% endif %}> À surveiller</label>
     <button class="button button-secondary filter-submit" type="submit">Appliquer</button>
     <a class="button button-quiet filter-reset {% if not has_filters %}is-hidden{% endif %}" id="filter-reset" href="{{ url_for('inventory.index') }}">Réinitialiser</a>
   </form>
@@ -98,18 +99,21 @@
   if (search) search.addEventListener('input', () => updateResults(180));
   if (quantity) quantity.addEventListener('input', () => updateResults(220));
   form.querySelectorAll('select').forEach(select => select.addEventListener('change', () => updateResults(0)));
+  form.querySelectorAll('input[type="checkbox"]').forEach(input => input.addEventListener('change', () => updateResults(0)));
   if (reset) reset.addEventListener('click', event => {
     event.preventDefault();
     // reset() restores server-rendered defaults, which may already be filtered.
     for (const control of form.elements) {
-      if (control.name) control.value = '';
+      if (control.type === 'checkbox') control.checked = false;
+      else if (control.name) control.value = '';
     }
     updateResults(0);
   });
   window.addEventListener('popstate', () => {
     const params = new URLSearchParams(window.location.search);
     for (const input of form.elements) {
-      if (input.name) input.value = params.get(input.name) || '';
+      if (input.type === 'checkbox') input.checked = params.get(input.name) === input.value;
+      else if (input.name) input.value = params.get(input.name) || '';
     }
     updateResults(0);
   });

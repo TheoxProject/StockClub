@@ -15,6 +15,8 @@
         <p class="item-description">{{ item.description or 'Aucune description renseignée.' }}</p>
         <div class="item-card-bottom"><span class="stock-amount"><strong>{{ item.quantity }}</strong> disponible{% if item.quantity > 1 %}s{% endif %}</span><span class="item-arrow" aria-hidden="true">↗</span></div>
         <span class="out-quantity-note">Stock total : {{ item.quantity + out_quantity }} · Sorti : {{ out_quantity }}</span>
+        {% if item.is_consumable %}<span class="out-quantity-note">Consommable</span>{% endif %}
+        {% for reason in attention_by_item.get(item.id, []) %}<span class="out-quantity-note">{{ reason }}</span>{% endfor %}
         {% if item.location %}<span class="item-location">⌖ {{ item.location }}</span>{% endif %}
       </div>
     </a>

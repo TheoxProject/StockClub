@@ -101,6 +101,8 @@ class Item(db.Model):
     description = db.Column(db.Text, nullable=False, default="")
     category_id = db.Column(db.Integer, db.ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False, index=True)
     quantity = db.Column(db.Integer, nullable=False, default=0)
+    is_consumable = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    consumption_threshold = db.Column(db.Integer, nullable=True)
     unit = db.Column(db.String(40), nullable=False, default="unité")
     location = db.Column(db.String(160), nullable=False, default="")
     condition = db.Column(db.String(30), nullable=False, default="Bon état")
@@ -194,6 +196,7 @@ class Borrowing(db.Model):
     quantity_out = db.Column(db.Integer, nullable=False)
     quantity_returned = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     quantity_lost = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    quantity_consumed = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     note = db.Column(db.String(240), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     closed_at = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -210,7 +213,7 @@ class Borrowing(db.Model):
 
     @property
     def remaining_quantity(self) -> int:
-        return max(0, self.quantity_out - (self.quantity_returned or 0) - (self.quantity_lost or 0))
+        return max(0, self.quantity_out - (self.quantity_returned or 0) - (self.quantity_lost or 0) - (self.quantity_consumed or 0))
 
     @property
     def is_open(self) -> bool:
@@ -316,4 +319,36 @@ class BoxFillReceipt(db.Model):
     payload_hash = db.Column(db.String(64), nullable=False)
     reference_count = db.Column(db.Integer, nullable=False)
     unit_count = db.Column(db.BigInteger, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Consumption(db.Model):
+    __tablename__ = "consumptions"
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True)
+    borrowing_id = db.Column(db.Integer, db.ForeignKey("borrowings.id", ondelete="SET NULL"), nullable=True)
+    box_id = db.Column(db.Integer, db.ForeignKey("storage_boxes.id", ondelete="SET NULL"), nullable=True)
+    original_id = db.Column(db.Integer, db.ForeignKey("consumptions.id", ondelete="RESTRICT"), nullable=True, unique=True)
+    restored_outside = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    item_name_snapshot = db.Column(db.String(160), nullable=False)
+    box_name_snapshot = db.Column(db.String(160), nullable=False, default="")
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    quantity = db.Column(db.Integer, nullable=False)
+    note = db.Column(db.String(240), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    item = db.relationship("Item")
+    borrowing = db.relationship("Borrowing")
+    box = db.relationship("StorageBox")
+    user = db.relationship("User")
+    original = db.relationship("Consumption", remote_side=[id], backref=db.backref("cancellation", uselist=False))
+
+
+class ConsumableReceipt(db.Model):
+    __tablename__ = "consumable_receipts"
+    id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    operation = db.Column(db.String(20), nullable=False)
+    target_id = db.Column(db.Integer, nullable=False)
+    payload_hash = db.Column(db.String(64), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)

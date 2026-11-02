@@ -9,12 +9,12 @@ from pathlib import Path
 from flask import (abort, current_app, flash, make_response, redirect,
                    render_template, request, send_from_directory, url_for)
 from flask_login import current_user, login_required
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 
 from . import bp
 from ..admin.decorators import admin_required
 from ..extensions import db
-from ..models import BoxContent, BoxEvent, Borrowing, BorrowingEvent, Category, Item, StockMovement, StorageBox, utcnow
+from ..models import BoxContent, BoxEvent, Borrowing, BorrowingEvent, Category, Consumption, Item, StockMovement, StorageBox, utcnow
 from ..box_operations import available, content, get_box, sources_for
 from ..storage import InvalidImage, PhotoStorageError, delete_unreferenced_photo, save_photo
 from ..transactions import synchronized
@@ -73,21 +73,59 @@ def _outstanding_subquery():
     return (
         db.session.query(
             Borrowing.item_id.label("item_id"),
-            db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost).label("outstanding_quantity"),
+            db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost - Borrowing.quantity_consumed).label("outstanding_quantity"),
         )
         .filter(
             Borrowing.item_id.isnot(None),
-            Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost,
+            Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed,
         )
         .group_by(Borrowing.item_id)
         .subquery()
     )
 
 
+def _attention_clause(outstanding_quantity):
+    return or_(
+        Item.condition.in_(["À contrôler", "À réparer", "Hors service"]),
+        and_(Item.is_consumable.is_(True), Item.consumption_threshold.isnot(None),
+             Item.quantity + outstanding_quantity <= Item.consumption_threshold),
+    )
+
+
+def _attention_reasons(item, outstanding):
+    reasons = []
+    if item.condition in {"À contrôler", "À réparer", "Hors service"}:
+        reasons.append(f"État : {item.condition}")
+    total = item.quantity + outstanding
+    if item.is_consumable and item.consumption_threshold is not None and total <= item.consumption_threshold:
+        reasons.append(f"Stock bas : {total} {item.unit} restante(s) · seuil {item.consumption_threshold}")
+    return reasons
+
+
+def _consumable_fields(item=None):
+    """Ignore forged administrator fields from members; validate under the write lock."""
+    if not current_user.is_admin:
+        return (item.is_consumable, item.consumption_threshold) if item else (False, None)
+    enabled = request.form.get("is_consumable") in {"1", "on", "true"}
+    if item and item.is_consumable and not enabled and _item_outstanding(item.id):
+        raise ValueError("Impossible de retirer l’attribut Consommable tant qu’un emprunt reste ouvert.")
+    raw = request.form.get("consumption_threshold", "").strip()
+    threshold = None
+    if enabled and raw:
+        if not raw.isascii() or not raw.isdecimal() or len(raw) > 7:
+            raise ValueError("Le seuil doit être un entier de 0 à 1 000 000, ou vide.")
+        threshold = int(raw)
+        if threshold > 1000000:
+            raise ValueError("Le seuil ne peut pas dépasser 1 000 000.")
+    return enabled, threshold
+
+
 def _build_inventory_query():
     outstanding = _outstanding_subquery()
     outstanding_quantity = db.func.coalesce(outstanding.c.outstanding_quantity, 0)
     query = Item.query.join(Category).outerjoin(outstanding, outstanding.c.item_id == Item.id)
+    if request.args.get("attention") == "1":
+        query = query.filter(_attention_clause(outstanding_quantity))
     search = request.args.get("q", "").strip()[:120]
     if search:
         pattern = f"%{search}%"
@@ -132,18 +170,19 @@ def _build_inventory_query():
 
 
 def _render_inventory_results(items, outstanding_by_item, *, search, selected_category, availability, quantity_min):
-    has_filters = bool(search or selected_category or availability or quantity_min is not None)
+    has_filters = bool(search or selected_category or availability or quantity_min is not None or request.args.get("attention") == "1")
     return render_template(
         "inventory/_item_results.html",
         items=items,
         outstanding_by_item=outstanding_by_item,
         has_filters=has_filters,
+        attention_by_item={item.id: _attention_reasons(item, outstanding_by_item.get(item.id, 0)) for item in items},
         box_results=_box_search(search),
     )
 
 
 def _box_search(search):
-    if not search:
+    if not search or request.args.get("attention") == "1":
         return []
     pattern = f"%{search}%"
     return StorageBox.query.filter(StorageBox.is_active.is_(True), or_(StorageBox.name.ilike(pattern), StorageBox.description.ilike(pattern))).order_by(StorageBox.name).all()
@@ -158,11 +197,11 @@ def index():
         rows = (
             db.session.query(
                 Borrowing.item_id,
-                db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost),
+                db.func.sum(Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost - Borrowing.quantity_consumed),
             )
             .filter(
                 Borrowing.item_id.in_([item.id for item in items]),
-                Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost,
+                Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed,
             )
             .group_by(Borrowing.item_id)
             .all()
@@ -184,7 +223,9 @@ def index():
     total_units = db.session.query(db.func.coalesce(db.func.sum(Item.quantity), 0)).scalar()
     total_outstanding = int(db.session.query(db.func.coalesce(db.func.sum(_outstanding_subquery().c.outstanding_quantity), 0)).scalar())
     total_stock = int(total_units) + total_outstanding
-    attention_count = Item.query.filter(Item.condition.in_(["À contrôler", "À réparer", "Hors service"])).count()
+    attention_outstanding = _outstanding_subquery()
+    attention_count = Item.query.outerjoin(attention_outstanding, attention_outstanding.c.item_id == Item.id).filter(
+        _attention_clause(db.func.coalesce(attention_outstanding.c.outstanding_quantity, 0))).count()
     return render_template(
         "inventory/index.html",
         items=items,
@@ -194,7 +235,9 @@ def index():
         search=search,
         availability=availability,
         quantity_min=quantity_min if quantity_min is not None else "",
-        has_filters=bool(search or selected_category or availability or quantity_min is not None),
+        has_filters=bool(search or selected_category or availability or quantity_min is not None or request.args.get("attention") == "1"),
+        attention_only=request.args.get("attention") == "1",
+        attention_by_item={item.id: _attention_reasons(item, outstanding_by_item.get(item.id, 0)) for item in items},
         total_references=total_references,
         total_units=total_units,
         total_outstanding=total_outstanding, total_stock=total_stock,
@@ -208,7 +251,7 @@ def index():
 def loans():
     active_loans = (
         Borrowing.query
-        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed)
         .filter(Borrowing.item_id.isnot(None))
         .order_by(Borrowing.created_at.asc(), Borrowing.id.asc())
         .all()
@@ -254,6 +297,7 @@ def create_item():
             category = db.session.get(Category, category_id)
             if category is None:
                 raise ValueError("La catégorie sélectionnée n’existe pas.")
+            is_consumable, consumption_threshold = _consumable_fields()
             photo = _uploaded_photo()
             photo_key = save_photo(photo)
         except PhotoStorageError as exc:
@@ -267,6 +311,7 @@ def create_item():
             name=name, description=description, category=category,
             quantity=quantity, unit=unit, location=location,
             condition=condition, photo_key=photo_key,
+            is_consumable=is_consumable, consumption_threshold=consumption_threshold,
             created_by=current_user, updated_by=current_user,
         )
         try:
@@ -290,7 +335,7 @@ def item_detail(item_id):
     item = db.get_or_404(Item, item_id)
     active_borrowings = (
         Borrowing.query.filter_by(item_id=item.id)
-        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed)
         .order_by(Borrowing.created_at.asc(), Borrowing.id.asc()).all()
     )
     recent_loan_events = (
@@ -306,6 +351,8 @@ def item_detail(item_id):
         outstanding_quantity=outstanding_quantity,
         recent_loan_events=recent_loan_events, sources=sources, distribution=distribution,
         outside_available=outside_available, box_events=box_events,
+        attention_reasons=_attention_reasons(item, outstanding_quantity),
+        consumptions=Consumption.query.filter_by(item_id=item.id).order_by(Consumption.created_at.desc(), Consumption.id.desc()).all(),
     )
 
 
@@ -338,6 +385,7 @@ def edit_item(item_id):
             category = db.session.get(Category, category_id)
             if category is None:
                 raise ValueError("La catégorie sélectionnée n’existe pas.")
+            is_consumable, consumption_threshold = _consumable_fields(item)
             new_photo = _uploaded_photo()
             new_photo_key = save_photo(new_photo) if new_photo and new_photo.filename else None
         except PhotoStorageError as exc:
@@ -353,6 +401,8 @@ def edit_item(item_id):
         item.unit = unit
         item.location = location
         item.condition = condition
+        item.is_consumable = is_consumable
+        item.consumption_threshold = consumption_threshold
         item.updated_by = current_user
         if new_photo_key:
             item.photo_key = new_photo_key
@@ -463,10 +513,10 @@ def return_loan(loan_id):
         flash(str(exc), "error")
         return redirect(url_for("inventory.loans"))
     db.session.commit()
-    if loan.remaining_quantity == 0 and not loan.quantity_lost:
+    if loan.remaining_quantity == 0 and not loan.quantity_lost and not loan.quantity_consumed:
         flash(f"Retour complet enregistré pour « {loan.item_name_snapshot} ».", "success")
     elif loan.remaining_quantity == 0:
-        flash("Retour enregistré ; cet emprunt est clôturé avec des pertes.", "success")
+        flash("Retour enregistré ; cet emprunt est clôturé avec consommation ou perte/casse.", "success")
     else:
         flash(f"Retour partiel enregistré. Il reste {loan.remaining_quantity} unité(s) à l’extérieur.", "success")
     return redirect(url_for("inventory.loans"))
@@ -481,9 +531,9 @@ ADJUSTMENT_REASONS = {
 
 def _item_outstanding(item_id):
     return int(db.session.query(db.func.coalesce(db.func.sum(
-        Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost
+        Borrowing.quantity_out - Borrowing.quantity_returned - Borrowing.quantity_lost - Borrowing.quantity_consumed
     ), 0)).filter(Borrowing.item_id == item_id,
-                 Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).scalar())
+                 Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed).scalar())
 
 
 @bp.route("/items/<int:item_id>/stock-adjustment", methods=["GET", "POST"])
@@ -601,7 +651,7 @@ def delete_item(item_id):
     item = db.get_or_404(Item, item_id)
     open_loan = (
         Borrowing.query.filter_by(item_id=item.id)
-        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost)
+        .filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed)
         .first()
     )
     if open_loan:

@@ -16,7 +16,7 @@ def legacy_snapshot():
     result = {}
     for table in ("items", "borrowings", "borrowing_events", "stock_movements"):
         columns = [c["name"] for c in sa.inspect(db.engine).get_columns(table)
-                   if c["name"] not in {"box_id", "box_name_snapshot", "group_id"}]
+                   if c["name"] not in {"box_id", "box_name_snapshot", "group_id", "is_consumable", "consumption_threshold", "quantity_consumed"}]
         result[table] = [tuple(row) for row in db.session.execute(sa.text(
             f"SELECT {', '.join(columns)} FROM {table} ORDER BY id"))]
     return result
@@ -72,4 +72,6 @@ def test_boxes_upgrade_real_0006_and_downgrade_guards(migration_app, populated):
                 command.downgrade(app.extensions["migrate"].migrate.get_config(), "0006_stock_adjustments")
             db.session.remove()
             assert StorageBox.query.count() == 1
-            assert db.session.get(Borrowing, 1).quantity_lost == 1
+            # The later migration may already be downgraded when 0007's guard
+            # refuses rollback. Read the historical column without the new ORM.
+            assert db.session.execute(sa.text("SELECT quantity_lost FROM borrowings WHERE id = 1")).scalar_one() == 1

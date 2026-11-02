@@ -16,7 +16,7 @@ def active_box(box_id):
 
 def box_rows(box):
     contents = {c.item_id: c for c in BoxContent.query.filter_by(box_id=box.id).all()}
-    loans = Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).all()
+    loans = Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed).all()
     outstanding = {}
     for loan in loans:
         outstanding[loan.item_id] = outstanding.get(loan.item_id, 0) + loan.remaining_quantity
@@ -107,7 +107,7 @@ def edit(box_id):
 @login_required
 def detail(box_id):
     box = db.get_or_404(StorageBox, box_id)
-    loans = Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).order_by(Borrowing.created_at).all()
+    loans = Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed).order_by(Borrowing.created_at).all()
     events = BoxEvent.query.filter(or_(BoxEvent.source_box_id == box.id, BoxEvent.destination_box_id == box.id)).order_by(BoxEvent.created_at.desc(), BoxEvent.id.desc()).all()
     groups = LoanGroup.query.filter_by(box_id=box.id).order_by(LoanGroup.created_at.desc()).all()
     recent_loan_events = BorrowingEvent.query.join(Borrowing, BorrowingEvent.borrowing_id == Borrowing.id).filter(Borrowing.box_id == box.id).order_by(BorrowingEvent.created_at.desc(), BorrowingEvent.id.desc()).all()
@@ -182,7 +182,7 @@ def checkout(box_id):
 @synchronized()
 def return_box(box_id):
     box = active_box(box_id)
-    loans = Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).order_by(Borrowing.created_at, Borrowing.id).all()
+    loans = Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed).order_by(Borrowing.created_at, Borrowing.id).all()
     if request.method == 'POST':
         try:
             lines = selected_lines({loan.id: loan for loan in loans})
@@ -214,7 +214,7 @@ def return_box(box_id):
 @synchronized(admin=True)
 def delete(box_id):
     box = active_box(box_id)
-    if Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost).first():
+    if Borrowing.query.filter_by(box_id=box.id).filter(Borrowing.quantity_out > Borrowing.quantity_returned + Borrowing.quantity_lost + Borrowing.quantity_consumed).first():
         flash('Impossible de supprimer cette boîte : des emprunts restent ouverts.', 'error')
         return redirect(url_for('boxes.detail', box_id=box.id))
     try:

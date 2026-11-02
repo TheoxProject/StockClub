@@ -12,7 +12,12 @@ from test_v3_stock_migration import migration_app, old_insert
 
 
 def snapshot():
-    return {name: [tuple(row) for row in db.session.execute(sa.text(f"SELECT * FROM {name} ORDER BY id"))]
+    # PostgreSQL rolls back the entire transactional downgrade when 0008's
+    # receipt guard refuses it, so newer columns may still exist. Compare every
+    # historical value by name rather than including later schema additions.
+    later_columns = {"is_consumable", "consumption_threshold", "quantity_consumed"}
+    return {name: [{key: value for key, value in row.items() if key not in later_columns}
+                   for row in db.session.execute(sa.text(f"SELECT * FROM {name} ORDER BY id")).mappings()]
             for name in ("users", "items", "storage_boxes", "box_contents", "box_events", "borrowings", "stock_movements")}
 
 

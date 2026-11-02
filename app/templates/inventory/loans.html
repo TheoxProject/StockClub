@@ -3,8 +3,8 @@
 {% block title %}Matériel sorti{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div><span class="eyebrow">SUIVI DES EMPRUNTS</span><h1>Matériel sorti</h1><p class="muted">Enregistre les retours réels. Un administrateur peut aussi déclarer une perte ou une casse, sans la compter comme un retour.</p></div>
-  <a class="button button-secondary heading-action" href="{{ url_for('inventory.index') }}">← Inventaire</a>
+  <div><span class="eyebrow">SUIVI DES EMPRUNTS</span><h1>Matériel sorti</h1><p class="muted">Retourne le matériel inutilisé ou consomme explicitement les consommables utilisés. Un administrateur peut aussi déclarer une perte ou une casse.</p></div>
+  <div class="detail-actions"><a class="button button-secondary" href="{{ url_for('inventory.index') }}">← Inventaire</a><a class="button button-quiet" href="{{ url_for('consumables.history') }}">Historique des consommables</a></div>
 </section>
 <section class="stats-grid" aria-label="Résumé des sorties">
   <article class="stat-card"><span class="stat-icon stat-icon-green" aria-hidden="true">↗</span><div><span class="stat-label">Emprunts en cours</span><strong>{{ active_loans|length }}</strong><small>sorties non clôturées</small></div></article>
@@ -33,17 +33,18 @@
             <input id="return-note-{{ loan.id }}" type="text" name="note" maxlength="240" placeholder="Ex. retour de 2 unités">
             <button class="button button-primary" type="submit" onclick="return confirm('Confirmer le retour de cette quantité ?')">Enregistrer le retour</button>
           </form>
+          {% if loan.item and loan.item.is_consumable %}<p><a class="button button-secondary" href="{{ url_for('consumables.consume_loan', loan_id=loan.id) }}">Consommer</a></p>{% endif %}
           {% if current_user.is_admin %}<div class="write-off-action"><a class="button button-danger" href="{{ url_for('inventory.write_off_loan', loan_id=loan.id) }}">Déclarer une perte ou une casse</a></div>{% endif %}
         </article>
       {% endfor %}
     </div>
   {% else %}
-    <div class="empty-state"><span class="empty-icon" aria-hidden="true">✓</span><h3>Aucun emprunt en cours</h3><p>Il ne reste aucune quantité à rendre. Les retours, pertes et casses restent consultables dans l’historique.</p><a class="button button-primary" href="{{ url_for('inventory.index') }}">Voir l’inventaire</a></div>
+    <div class="empty-state"><span class="empty-icon" aria-hidden="true">✓</span><h3>Aucun emprunt en cours</h3><p>Il ne reste aucune quantité à rendre. Retours, consommations, pertes et casses restent consultables dans l’historique.</p><a class="button button-primary" href="{{ url_for('inventory.index') }}">Voir l’inventaire</a></div>
   {% endif %}
 </section>
 
 <section class="inventory-section loan-history-section">
-  <div class="section-title-row"><div><h2>Historique des sorties et retours, pertes et casses</h2><span class="muted small">Les 100 derniers événements, classés du plus récent au plus ancien. Les compteurs indiquent l’état actuel de chaque emprunt.</span></div></div>
+  <div class="section-title-row"><div><h2>Historique des sorties et retours, consommations, pertes et casses</h2><span class="muted small">Les 100 derniers événements, classés du plus récent au plus ancien. Les compteurs indiquent l’état actuel de chaque emprunt.</span></div></div>
   {% if recent_events %}
     <div class="panel loan-events">
       {{ loan_events(recent_events, true) }}

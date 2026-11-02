@@ -30,6 +30,13 @@
     <div class="form-grid">
       {% if not item %}<div class="field"><label for="quantity">Quantité initiale <span class="required">*</span></label><input id="quantity" name="quantity" type="number" inputmode="numeric" min="0" max="1000000" step="1" required value="{{ form.get('quantity', '1') }}"></div>{% else %}<div class="field"><label>Quantité actuelle</label><div class="readonly-stock">{{ item.quantity }} unité{% if item.quantity > 1 %}s{% endif %}</div><span class="field-hint">Pour gérer les emprunts et retours, utilise la section Stock de la fiche matériel.</span></div>{% endif %}
       <div class="field"><label for="condition">État général</label><select id="condition" name="condition">{% for value in conditions %}<option value="{{ value }}" {% if form.get('condition', item.condition if item else 'Bon état') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+      {% if current_user.is_admin %}
+      <div class="field full-width">
+        <label for="is_consumable"><input id="is_consumable" name="is_consumable" type="checkbox" value="1" {% if (request.method == 'POST' and form.get('is_consumable') in ['1', 'on', 'true']) or (request.method != 'POST' and item and item.is_consumable) %}checked{% endif %}> Consommable</label>
+        <span class="field-hint">Conserve les emprunts et retours habituels. Les membres pourront aussi consommer et réapprovisionner. Une unité correspond à cette fiche, sans conversion.</span>
+      </div>
+      <div class="field full-width"><label for="consumption_threshold">Seuil de consommation (facultatif)</label><input id="consumption_threshold" name="consumption_threshold" type="number" min="0" max="1000000" step="1" inputmode="numeric" value="{{ form.get('consumption_threshold', item.consumption_threshold if item and item.consumption_threshold is not none else '') }}"><span class="field-hint">Pour un consommable : vide désactive la surveillance ; 0 signale l’épuisement. « À surveiller » compare le seuil au stock total restant, disponible + encore emprunté, toutes boîtes comprises. Retirer l’attribut efface ce seuil et exige de solder les emprunts ouverts.</span></div>
+      {% endif %}
     </div>
     <div class="form-actions"><a class="button button-quiet" href="{{ url_for('inventory.item_detail', item_id=item.id) if item else url_for('inventory.index') }}">Annuler</a><button class="button button-primary button-large" type="submit">{{ 'Enregistrer les modifications' if item else 'Ajouter à l’inventaire' }}</button></div>
   </form>

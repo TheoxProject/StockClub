@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Réapprovisionner' if operation == 'replenish' else 'Annuler une consommation' if operation == 'cancel' else 'Consommer' }}{% endblock %}
+{% block content %}
+<div class="form-page">
+  <a class="back-link" href="{{ url_for('inventory.item_detail', item_id=item.id) }}">← Retour à la fiche</a>
+  <section class="form-intro"><h1>{{ 'Réapprovisionner' if operation == 'replenish' else 'Annuler une consommation' if operation == 'cancel' else 'Consommer' }}</h1><p>{{ item.name }}</p></section>
+  {% if operation == 'direct' %}<p>Prélève le disponible à la provenance choisie et diminue le stock total. Aucun emprunt ou retour n’est créé.</p>{% elif operation == 'loan' %}<p>Diminue le restant à rendre et le stock total, sans augmenter le disponible. Pour le matériel inutilisé, utilise l’action de retour séparée.</p><p>Provenance de l’emprunt : {{ loan.box_name_snapshot or 'Hors boîte' }}.</p>{% elif operation == 'replenish' %}<p>Augmente le disponible et le stock total ; aucun emprunt n’est modifié.</p>{% endif %}
+  <form method="post" class="form-card stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="operation_token" value="{{ operation_token }}">
+    {% if operation == 'cancel' %}
+      <p>Annuler {{ entry.quantity }} {{ item.unit }} consommé(s). Provenance d’origine : {{ entry.box_name_snapshot or 'Hors boîte' }}.</p>
+      {% if entry.kind == 'direct' %}<p>Destination de la restitution : {% if entry.box_name_snapshot and entry.box and entry.box.is_active %}{{ entry.box_name_snapshot }}{% else %}Hors boîte{% endif %}.</p>{% else %}<p>Le restant de l’emprunt sera rétabli{% if entry.box_name_snapshot %} pour la boîte {{ entry.box_name_snapshot }}{% endif %}.</p>{% endif %}
+      {% if entry.kind == 'direct' and entry.box_name_snapshot and (not entry.box or not entry.box.is_active) %}<label><input type="checkbox" name="restore_outside" value="1" required> Je confirme la restitution hors boîte car la boîte d’origine est indisponible.</label>{% endif %}
+    {% else %}
+      <div class="field"><label for="quantity">Quantité ({{ item.unit }})</label><input id="quantity" name="quantity" type="number" min="1" max="{{ loan.remaining_quantity if loan else 1000000 }}" step="1" required></div>
+      {% if operation == 'direct' %}<div class="field"><label for="source_box">Provenance</label><select id="source_box" name="source_box">{% for source in sources if source.available > 0 %}<option value="{{ source.id }}">{{ source.name }} · {{ source.available }} disponible(s)</option>{% endfor %}</select></div>{% endif %}
+      {% if operation == 'loan' %}<p>Restant à rendre : {{ loan.remaining_quantity }} {{ item.unit }}.</p>{% endif %}
+      {% if operation == 'replenish' %}<p>Destination : Hors boîte</p>{% endif %}
+    {% endif %}
+    <div class="field"><label for="note">{{ 'Motif obligatoire' if operation == 'cancel' else 'Commentaire facultatif' }}</label><textarea id="note" name="note" maxlength="240" {% if operation == 'cancel' %}required{% endif %}></textarea></div>
+    <div class="form-actions"><button class="button button-primary" type="submit">{{ 'Réapprovisionner' if operation == 'replenish' else 'Annuler la consommation' if operation == 'cancel' else 'Consommer' }}</button></div>
+  </form>
+</div>
+{% endblock %}
